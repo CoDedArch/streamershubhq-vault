@@ -157,7 +157,7 @@ async def _apply(db: AsyncSession, p: Post, body: PostIn) -> None:
                  "closes_on": j.closes_on.isoformat() if j.closes_on else None, "pay": (j.pay or "").strip() or None, "show_pay": j.show_pay,
                  "openings": j.openings, "responsibilities": _lines(j.responsibilities), "requirements": _lines(j.requirements),
                  "nice_to_have": _lines(j.nice_to_have), "apply_via": j.apply_via,
-                 "apply_url": PostService.ok_url(j.apply_url, allow_contact=True) if j.apply_via == "link" else None, "closed": j.closed}
+                 "apply_url": PostService.ok_url(j.apply_url, allow_email=True) if j.apply_via == "link" else None, "closed": j.closed}
         body.starts_at = body.ends_at = None
         body.link_url = None
         body.platform = None
@@ -524,7 +524,7 @@ async def page_out(db: AsyncSession, page: LinkPage, base: str, *, public: bool)
             "shares": None if public else page.shares,
             "items": [{"id": str(i.id), "kind": i.kind, "kind_label": LINK_KINDS.get(i.kind, "Link"), "label": i.label,
                        **({"go": f"{base}/api/v1/public/links/go/{i.id}"} if public else {"url": i.url, "clicks": i.clicks, "is_active": i.is_active})}
-                      for i in items if i.is_active or not public]}
+                      for i in items if not public or (i.is_active and not PostService.shows_phone(i.url))]}
 
 
 @router.get("/public/links/{slug}")
@@ -590,7 +590,7 @@ async def link_share(slug: str, body: LinkShareIn, db: AsyncSession = Depends(ag
 @router.get("/public/links/go/{item_id}")
 async def link_go(item_id: uuid.UUID, db: AsyncSession = Depends(aget_db)):
     item = await db.get(LinkItem, item_id)
-    if not item or not item.is_active:
+    if not item or not item.is_active or PostService.shows_phone(item.url):
         raise HTTPException(404, "This link has been removed.")
     item.clicks = (item.clicks or 0) + 1
     await db.commit()
@@ -618,7 +618,7 @@ async def save_page(db: AsyncSession, page: LinkPage, body: PageIn) -> None:
     keep = set()
     for n, raw in enumerate(body.items):
         kind = raw.kind if raw.kind in LINK_KINDS else "other"
-        url = PostService.ok_url(raw.url, allow_contact=True)
+        url = PostService.ok_url(raw.url, allow_email=True)
         item = existing.get(raw.id) if raw.id else None
         if not item:
             item = LinkItem(page_id=page.id)

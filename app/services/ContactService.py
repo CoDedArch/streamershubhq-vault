@@ -309,7 +309,7 @@ async def clean(db: AsyncSession, reason: str, raw: dict) -> tuple[dict, list[di
             continue
         elif kind == "url":
             try:
-                value = PostService.ok_url(value)
+                value = PostService.ok_url(value, public_page=False)
             except HTTPException:
                 problems.append(f"{fl['label']}: paste a full link.")
                 missing.append(key)

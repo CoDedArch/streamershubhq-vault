@@ -53,17 +53,32 @@ def visitor(raw: Optional[str]) -> str:
     return hashlib.sha256(f"{settings.SECRET_KEY}:visitor:{raw or 'anon'}".encode()).hexdigest()[:32]
 
 
-def ok_url(url: Optional[str], *, allow_contact: bool = False) -> Optional[str]:
+# Phone numbers never go on public pages: a call or text link, or a WhatsApp chat link, carries the number in it.
+# (WhatsApp channel and group links are fine.)
+PHONE_LINK = re.compile(r"^(tel:|sms:|whatsapp:|https?://(www\.)?(wa\.me/\+?\d|api\.whatsapp\.com/send|web\.whatsapp\.com/send))", re.I)
+
+
+def shows_phone(url: Optional[str]) -> bool:
+    return bool(url and PHONE_LINK.match(url.strip()))
+
+
+def ok_url(url: Optional[str], *, allow_email: bool = False, public_page: bool = True) -> Optional[str]:
+    """A link for a post, a job or a link page (public_page), or one a visitor sent us (public_page=False)."""
     if not url:
         return None
     url = url.strip()
-    if allow_contact and re.match(r"^(mailto:|tel:)", url, re.I):
+    if allow_email and re.match(r"^mailto:", url, re.I):
         return url
+    no_phones = "Phone numbers don't go on public pages. Link a channel, a page or an email address instead."
+    if public_page and shows_phone(url):
+        raise HTTPException(400, no_phones)
     if not re.match(r"^https?://", url, re.I):
         if re.match(r"^[\w.-]+\.[a-z]{2,}(/.*)?$", url, re.I):
             url = "https://" + url
         else:
             raise HTTPException(400, "Links must start with https://")
+    if public_page and shows_phone(url):  # wa.me/233… typed without https://
+        raise HTTPException(400, no_phones)
     return url[:500]
 
 
@@ -355,5 +370,6 @@ def job_public(p: Post) -> dict:
             "location": j.get("location"), "closes_on": closes, "closes_text": closes_text,
             "pay": j.get("pay") if j.get("show_pay") else None, "openings": j.get("openings") or 1,
             "responsibilities": j.get("responsibilities") or [], "requirements": j.get("requirements") or [],
-            "nice_to_have": j.get("nice_to_have") or [], "apply_via": j.get("apply_via") or "form", "apply_url": j.get("apply_url"),
+            "nice_to_have": j.get("nice_to_have") or [], "apply_via": "form" if shows_phone(j.get("apply_url")) else j.get("apply_via") or "form",
+            "apply_url": None if shows_phone(j.get("apply_url")) else j.get("apply_url"),
             "open": job_state(p) == "open" and p.status == "published"}
