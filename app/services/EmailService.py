@@ -22,7 +22,7 @@ def _layout(title: str, body_html: str, cta: Optional[tuple[str, str]] = None) -
 <h1 style="margin:0 0 14px;font-size:24px;line-height:1.15">{escape(title)}</h1>
 <div style="font-size:15px;line-height:1.6;color:#2A2925">{body_html}</div>{button}
 </td></tr>
-<tr><td style="padding:18px 28px;border-top:1px solid #EEEDE6;color:#5A5851;font-size:12px">Streamers Hub · Accra, Ghana · <a href="mailto:{settings.SH_CONTACT_EMAIL}" style="color:#5A5851">{settings.SH_CONTACT_EMAIL}</a></td></tr>
+<tr><td style="padding:18px 28px;border-top:1px solid #EEEDE6;color:#5A5851;font-size:12px">Streamers Hub · <a href="mailto:{settings.SH_CONTACT_EMAIL}" style="color:#5A5851">{settings.SH_CONTACT_EMAIL}</a></td></tr>
 </table></td></tr></table></body></html>"""
 
 

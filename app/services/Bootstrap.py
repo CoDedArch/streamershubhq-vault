@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.partnerships import Brand
 from app.models.people import AppSetting
+from app.models.posts import LinkPage
 from app.models.store import Product
 from app.models.talent import Honour, RosterSeat, Streamer
 
@@ -147,6 +148,19 @@ async def gta6_first(db: AsyncSession) -> str:
     return "GTA 6 first"
 
 
+OLD_ORG_BIO = "Africa's first content label for streamers. Accra, Ghana."
+
+
+async def org_link_bio(db: AsyncSession) -> str:
+    """The label's link page: the internet, not one city. Only replaces the old default, never a bio the team wrote."""
+    page = (await db.execute(select(LinkPage).where(LinkPage.slug == "streamershub", LinkPage.streamer_id.is_(None)))).scalar_one_or_none()
+    if not page or page.bio != OLD_ORG_BIO:
+        return "nothing to change"
+    page.bio = "The content label for the internet's next big streamers."
+    await db.flush()
+    return "new bio"
+
+
 async def label_line(db: AsyncSession) -> str:
     """The label's own merch, live in the store. Stock starts at the planned first run: set the real counts in
     Store operations."""
@@ -233,7 +247,7 @@ async def sample_clippers(db: AsyncSession) -> str:
 
 STEPS = [("roster_v1", roster), ("galacta_gta6_v1", gta6_first), ("label_line_v1", label_line),
          ("sample_partners_v1", sample_partners), ("sample_designer_line_v1", sample_designer_line),
-         ("sample_clippers_v1", sample_clippers)]
+         ("sample_clippers_v1", sample_clippers), ("org_link_bio_v1", org_link_bio)]
 
 
 async def run(db: AsyncSession) -> dict[str, str]:

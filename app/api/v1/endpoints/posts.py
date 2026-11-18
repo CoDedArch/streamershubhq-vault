@@ -494,7 +494,7 @@ async def verify_ticket(code: str, request: Request, db: AsyncSession = Depends(
 async def _org_page(db: AsyncSession) -> LinkPage:
     page = (await db.execute(select(LinkPage).where(LinkPage.streamer_id.is_(None), LinkPage.slug == ORG_SLUG))).scalar_one_or_none()
     if not page:
-        page = LinkPage(slug=ORG_SLUG, title="Streamers Hub", bio="Africa's first content label for streamers. Accra, Ghana.", theme="k")
+        page = LinkPage(slug=ORG_SLUG, title="Streamers Hub", bio="The content label for the internet's next big streamers.", theme="k")
         db.add(page)
         await db.flush()
         for i, (kind, label, url) in enumerate([("website", "Our website", "https://streamershubmedia.com"),

@@ -774,7 +774,7 @@ async def seed(db, reset: bool) -> dict:
     for name, qty, status in [("Kwame Asante", 2, "interest"), ("Akosua Boateng", 1, "interest"), ("Yaw Darko", 4, "interest")]:
         db.add(TicketBooking(post_id=posts[1].id, code=f"SH-{uuid.uuid4().hex[:6].upper()}", name=name, email=f"{name.split()[0].lower()}@{DOMAIN}",
                              phone_enc=encrypt("0241112223"), phone_last3="223", qty=qty, amount_minor=cedis(50) * qty, status=status))
-    org = LinkPage(slug="streamershub", title="Streamers Hub", bio="Africa's first content label for streamers. Accra, Ghana.", theme="k")
+    org = LinkPage(slug="streamershub", title="Streamers Hub", bio="The content label for the internet's next big streamers.", theme="k")
     gp = LinkPage(slug="galacta", streamer_id=galacta.id, title="Galacta", bio="GTA 6 · NBA 2K · EA FC · Apex Legends. Signing No. 01 at Streamers Hub.", theme="y")
     db.add_all([org, gp])
     await db.flush()

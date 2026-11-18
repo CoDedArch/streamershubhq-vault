@@ -45,7 +45,7 @@ async def test_startup_fills_the_public_site_once(empty):
     async with session_manager.session_factory() as db:
         done = await Bootstrap.run(db)
     assert set(done) == {"roster_v1", "galacta_gta6_v1", "label_line_v1", "sample_partners_v1", "sample_designer_line_v1",
-                         "sample_clippers_v1"}
+                         "sample_clippers_v1", "org_link_bio_v1"}
     home = (await guest.get("/api/v1/public/home")).json()
     star = home["roster"][0]
     assert star["stage_name"] == "Galacta" and star["number"] == "01" and star["content"].startswith("GTA 6")
@@ -154,3 +154,19 @@ async def test_sample_clippers_fill_the_clip_table_but_cannot_sign_in_or_be_paid
         assert await db.scalar(select(func.count()).select_from(User).where(User.is_sample.is_(True))) == 0
         assert await db.scalar(select(func.count()).select_from(Clip)) == 0
         assert await Bootstrap.run(db) == {}  # a restart doesn't bring them back
+
+
+async def test_the_labels_link_page_bio_drops_the_old_city_line_only_if_nobody_changed_it(empty):
+    from app.models.posts import LinkPage
+
+    async with session_manager.session_factory() as db:
+        db.add(LinkPage(slug="streamershub", title="Streamers Hub", bio=Bootstrap.OLD_ORG_BIO, theme="k"))
+        await db.commit()
+        assert await Bootstrap.org_link_bio(db) == "new bio"
+        await db.commit()
+        page = (await db.execute(select(LinkPage).where(LinkPage.slug == "streamershub"))).scalar_one()
+        assert page.bio == "The content label for the internet's next big streamers."
+        page.bio = "Written by the team."
+        await db.commit()
+        assert await Bootstrap.org_link_bio(db) == "nothing to change"
+        assert (await db.execute(select(LinkPage.bio).where(LinkPage.slug == "streamershub"))).scalar_one() == "Written by the team."
