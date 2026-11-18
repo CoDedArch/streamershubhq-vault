@@ -34,6 +34,7 @@ class User(Row, Base):
     status: Mapped[str] = mapped_column(String(20), default="invited")  # invited, active, suspended
     # A sample account (the placeholder clippers on the Clip Table): can't sign in, is never paid, and is removed in one go
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The photo's file key, signed each time it's shown (S3Service.signed_url passes a full link through unchanged)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     invite_token_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     invite_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

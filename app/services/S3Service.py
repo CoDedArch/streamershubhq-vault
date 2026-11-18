@@ -1,6 +1,6 @@
 """Private file storage. The shared S3 bucket under the SH_S3_PREFIX key prefix, or a local folder
-when no bucket is configured (development and tests). Files are always served by short-lived signed
-URLs; nothing is public by default."""
+when no bucket is configured or SH_STORAGE=local (development and tests only: production refuses to start
+without a bucket). Files are always served by short-lived signed URLs; nothing is public by default."""
 
 import hashlib
 import hmac
@@ -27,14 +27,30 @@ class UploadRejected(ValueError):
 
 
 def use_s3() -> bool:
-    return bool(settings.AWS_S3_BUCKET and settings.AWS_ACCESS_KEY_ID) and os.getenv("SH_STORAGE", "") != "local"
+    """S3 whenever a bucket is set. SH_STORAGE=local keeps files on this machine, outside production only."""
+    if os.getenv("SH_STORAGE", "") == "local" and not settings.is_production:
+        return False
+    return bool(settings.AWS_S3_BUCKET)
+
+
+def production_problems() -> list[str]:
+    """Why production can't store files safely; checked when the API starts (app/main.py)."""
+    problems = []
+    if not settings.AWS_S3_BUCKET:
+        problems.append("AWS_S3_BUCKET is not set: production never keeps files on the container's disk.")
+    if os.getenv("SH_STORAGE", "") == "local":
+        problems.append("SH_STORAGE=local is for development only.")
+    return problems
 
 
 def _client():
     import boto3
 
-    return boto3.client("s3", region_name=settings.AWS_REGION, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
+    # The keys when both are given; otherwise boto3's own chain (the ECS task role in production)
+    keys = {}
+    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+        keys = {"aws_access_key_id": settings.AWS_ACCESS_KEY_ID, "aws_secret_access_key": settings.AWS_SECRET_ACCESS_KEY}
+    return boto3.client("s3", region_name=settings.AWS_REGION, **keys)
 
 
 def check_file(data: bytes, content_type: str, kinds: tuple[str, ...]) -> str:
@@ -58,6 +74,8 @@ def put(folder: str, filename: str, data: bytes, content_type: str) -> str:
     if use_s3():
         _client().put_object(Bucket=settings.AWS_S3_BUCKET, Key=key, Body=data, ContentType=content_type,
                              ServerSideEncryption="AES256")
+    elif settings.is_production:
+        raise RuntimeError("Refusing to store a file on the container's disk in production: set AWS_S3_BUCKET")
     else:
         path = LOCAL_ROOT / key
         path.parent.mkdir(parents=True, exist_ok=True)

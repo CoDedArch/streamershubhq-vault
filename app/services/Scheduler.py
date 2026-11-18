@@ -7,12 +7,16 @@ Hourly it checks the date in Accra and runs each job once per day it is due:
 - the 1st: streamer salary tiers for the new month (and Finance and the streamer are told)
 - the 25th (payroll draft_day): the payout run is drafted
 - Sundays: the Clip Table's ranks are saved so next week shows movement
+
+Only one API instance runs a pass at a time (a Postgres advisory lock), so rolling deploys and more than one
+task are safe: an instance that finds the lock taken skips the pass, and the jobs are marked done for the day
+by the one holding it.
 """
 
 import asyncio
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.database import session_manager
 from app.models.people import AppSetting
@@ -22,6 +26,7 @@ from app.services.money import month_key
 from app.services.SettingsService import get_setting
 
 logger = logging.getLogger(__name__)
+LOCK_KEY = 5_348_000_001  # any fixed number; only the scheduler takes it (advisory locks are per database)
 
 
 async def _once(db, job: str, day_key: str) -> bool:
@@ -37,6 +42,21 @@ async def _once(db, job: str, day_key: str) -> bool:
 
 
 async def run_due_jobs() -> list[str]:
+    """Run what is due, unless another instance is already running a pass."""
+    async with session_manager.engine.connect() as lock:
+        got = (await lock.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": LOCK_KEY})).scalar()
+        await lock.commit()  # the lock belongs to the connection, not the transaction: don't sit idle in one
+        if not got:
+            logger.info("Scheduler pass skipped: another instance is running one")
+            return []
+        try:
+            return await _run_due_jobs()
+        finally:
+            await lock.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": LOCK_KEY})
+            await lock.commit()
+
+
+async def _run_due_jobs() -> list[str]:
     ran = []
     d = today()
     stamp = d.isoformat()

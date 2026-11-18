@@ -14,7 +14,7 @@ from app.core.database import aget_db
 from app.core.security import (OS_COOKIE, clear_cookie, get_current_user, get_session, hash_password, hash_token,
                                new_token, now, read_session, start_session, user_by_email, verify_password)
 from app.models.people import AuthSession, OnboardingRun, User
-from app.services import AuthService, EmailService
+from app.services import AuthService, EmailService, S3Service
 from app.services.AuditService import audit
 from app.services.NavService import ACCESS_LABEL, footer, nav_counts
 
@@ -56,7 +56,7 @@ def initials(name: str) -> str:
     return (parts[0][0] + parts[-1][0]).upper()
 
 
-async def me_payload(db: AsyncSession, user: User) -> dict:
+async def me_payload(db: AsyncSession, user: User, base: str = "") -> dict:
     access = await load_access(db, user)
     counts = await nav_counts(db, access) if user.role in OS_ROLES else {}
     nav = []
@@ -74,7 +74,7 @@ async def me_payload(db: AsyncSession, user: User) -> dict:
         due = {"id": str(waiting.id), "title": waiting.title, "stage": waiting.stage} if waiting else None
     return {
         "id": str(user.id), "name": user.name, "email": user.email, "handle": user.handle, "role": user.role,
-        "initials": initials(user.handle or user.name), "avatar_url": user.avatar_url,
+        "initials": initials(user.handle or user.name), "avatar_url": S3Service.signed_url(user.avatar_url, 3600, base),
         "department": access.department, "desk": access.desk, "title": access.title, "areas": access.areas,
         "review_lists": access.review_lists, "home": access.home, "nav": nav, "stepped_in": access.stepped_in,
         "access_label": ACCESS_LABEL.get(access.desk or "", "Hub OS") if user.role in OS_ROLES else None,
@@ -111,7 +111,7 @@ async def login(body: LoginIn, request: Request, response: Response, db: AsyncSe
     await start_session(db, response, request, kind="portal", user_id=user.id)
     user.last_login_at = now()
     await db.commit()
-    return {"step": "done", "user": await me_payload(db, user)}
+    return {"step": "done", "user": await me_payload(db, user, str(request.base_url).rstrip("/"))}
 
 
 @router.post("/otp/verify")
@@ -125,7 +125,7 @@ async def verify_code(body: CodeIn, request: Request, response: Response, db: As
     user.last_login_at = now()
     await audit(db, user, "auth.sign_in", "user", user.id, request=request, summary="Signed in with a one-time code")
     await db.commit()
-    return {"step": "done", "user": await me_payload(db, user)}
+    return {"step": "done", "user": await me_payload(db, user, str(request.base_url).rstrip("/"))}
 
 
 @router.post("/otp/resend")
@@ -148,8 +148,8 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
 
 
 @router.get("/me")
-async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(aget_db)):
-    return await me_payload(db, user)
+async def me(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(aget_db)):
+    return await me_payload(db, user, str(request.base_url).rstrip("/"))
 
 
 @router.post("/sessions/end-others")

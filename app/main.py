@@ -10,11 +10,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.v1.router import api_router
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.core.database import session_manager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def refuse_unsafe_production() -> None:
+    """Production doesn't start on development defaults. Only when ENVIRONMENT=production: tests and local dev
+    are never checked."""
+    if not settings.is_production:
+        return
+    from app.services import S3Service
+
+    problems = []
+    if not settings.SECRET_KEY or settings.SECRET_KEY == Settings.model_fields["SECRET_KEY"].default:
+        problems.append("SECRET_KEY is the development default: set a long random value.")
+    problems += S3Service.production_problems()
+    if problems:
+        raise RuntimeError("Refusing to start in production. " + " ".join(problems))
+    if not settings.SH_DATA_KEY:
+        logger.warning("SH_DATA_KEY is not set: personal data is encrypted with a key derived from SECRET_KEY, "
+                       "so changing SECRET_KEY would make phone and account numbers unreadable.")
 
 
 async def _website_content() -> None:
@@ -30,6 +48,7 @@ async def _website_content() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    refuse_unsafe_production()
     await session_manager.init()
     await _website_content()
     task = None

@@ -474,7 +474,7 @@ async def _onboarding_agreement(db: AsyncSession, user: User) -> Optional[dict]:
 
 
 @router.get("/onboarding/me")
-async def my_onboarding(access: Access = Depends(current_access), db: AsyncSession = Depends(aget_db)):
+async def my_onboarding(request: Request, access: Access = Depends(current_access), db: AsyncSession = Depends(aget_db)):
     run = await _run(db, access.user)
     profile = (await db.execute(select(StaffProfile).where(StaffProfile.user_id == access.user.id))).scalar_one_or_none()
     lead = None
@@ -492,7 +492,7 @@ async def my_onboarding(access: Access = Depends(current_access), db: AsyncSessi
                         "bank_hint": f"{profile.bank_name} ··· {profile.bank_last4}" if profile and profile.bank_last4 else None,
                         "emergency_contact": profile.emergency_contact if profile else None,
                         "phone_hint": f"··· {access.user.phone_last4}" if access.user.phone_last4 else None,
-                        "avatar_url": access.user.avatar_url}}
+                        "avatar_url": S3Service.signed_url(access.user.avatar_url, 3600, str(request.base_url).rstrip("/"))}}
 
 
 class StepIn(BaseModel):
@@ -570,7 +570,7 @@ async def onboarding_step(n: int, body: StepIn, request: Request, access: Access
     else:
         run.current_step = max(run.current_step, n + 1)
     await db.commit()
-    return await my_onboarding(access, db)
+    return await my_onboarding(request, access, db)
 
 
 @router.post("/me/photo")
@@ -581,10 +581,11 @@ async def upload_photo(request: Request, file: UploadFile = File(...), access: A
         S3Service.check_file(body, file.content_type or "", ("image",))
     except S3Service.UploadRejected as exc:
         raise HTTPException(400, str(exc))
-    key = S3Service.put("avatars", file.filename or "photo", body, file.content_type)
-    access.user.avatar_url = S3Service.signed_url(key, 7 * 24 * 3600, str(request.base_url).rstrip("/"))
+    # The file key is kept and a fresh link signed each time it's shown: a saved signed link stops working
+    # once the credentials that signed it expire (hours, with the ECS task role)
+    access.user.avatar_url = S3Service.put("avatars", file.filename or "photo", body, file.content_type)
     await db.commit()
-    return {"avatar_url": access.user.avatar_url}
+    return {"avatar_url": S3Service.signed_url(access.user.avatar_url, 3600, str(request.base_url).rstrip("/"))}
 
 
 # Me --------------------------------------------------------------------------------------------------
