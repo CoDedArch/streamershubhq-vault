@@ -1,0 +1,6 @@
+.env
+.env.streamershub
+venv/
+__pycache__/
+storage/
+.pytest_cache/
