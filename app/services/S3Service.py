@@ -4,6 +4,7 @@ without a bucket). Files are always served by short-lived signed URLs; nothing i
 
 import hashlib
 import hmac
+import logging
 import mimetypes
 import os
 import time
@@ -14,6 +15,7 @@ from typing import Optional
 from app.core.config import settings
 
 LOCAL_ROOT = Path(os.getenv("SH_LOCAL_STORAGE", "storage"))
+logger = logging.getLogger(__name__)
 
 ALLOWED = {
     "image": {"image/png": b"\x89PNG", "image/jpeg": b"\xff\xd8\xff", "image/webp": b"RIFF"},
@@ -24,6 +26,15 @@ MAX_BYTES = {"image": 15 * 1024 * 1024, "document": 20 * 1024 * 1024}
 
 class UploadRejected(ValueError):
     pass
+
+
+class StorageUnavailable(RuntimeError):
+    """S3 wouldn't take the file. app/main.py answers it as a 503 the website can show, instead of a bare 500
+    that the browser blocks (no CORS header) and the site reads as "can't reach Streamers Hub"."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
 
 
 def use_s3() -> bool:
@@ -72,8 +83,14 @@ def put(folder: str, filename: str, data: bytes, content_type: str) -> str:
     ext = mimetypes.guess_extension(content_type) or Path(filename).suffix or ""
     key = f"{settings.SH_S3_PREFIX}/{folder}/{uuid.uuid4().hex}{ext}"
     if use_s3():
-        _client().put_object(Bucket=settings.AWS_S3_BUCKET, Key=key, Body=data, ContentType=content_type,
-                             ServerSideEncryption="AES256")
+        try:
+            _client().put_object(Bucket=settings.AWS_S3_BUCKET, Key=key, Body=data, ContentType=content_type,
+                                 ServerSideEncryption="AES256")
+        except Exception as exc:
+            # AWS's error code (AccessDenied, NoSuchBucket...) or, with no answer from AWS, the error's name
+            code = ((getattr(exc, "response", None) or {}).get("Error") or {}).get("Code") or type(exc).__name__
+            logger.exception("S3 wouldn't store %s (%s)", key, code)
+            raise StorageUnavailable(code) from exc
     elif settings.is_production:
         raise RuntimeError("Refusing to store a file on the container's disk in production: set AWS_S3_BUCKET")
     else:

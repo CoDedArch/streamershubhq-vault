@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import api_router
 from app.core.config import Settings, settings
 from app.core.database import session_manager
+from app.services.S3Service import StorageUnavailable
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -88,6 +89,11 @@ def create_app(lifespan_on: bool = True) -> FastAPI:
             if loc:
                 missing.append(loc[-1])
         return JSONResponse(status_code=422, content={"detail": {"message": "Check the highlighted fields.", "missing": missing}})
+
+    @app.exception_handler(StorageUnavailable)
+    async def storage_unavailable(request: Request, exc: StorageUnavailable):
+        # Answered here, inside CORS, so the website can read it (S3Service logs the full error)
+        return JSONResponse(status_code=503, content={"detail": f"We couldn't save the file just now (storage error: {exc.code}). Try again in a minute."})
 
     app.include_router(api_router, prefix="/api/v1")
 
