@@ -11,18 +11,22 @@ design's 20 placeholder brand partners, three Designer Series pieces, and eight 
 These are marked `is_sample`, so Hub OS tags them and removes them all in one go (Partnerships, Store
 operations and Social). Sample clippers can't sign in, are never paid and never count in the numbers. Everything else that
 is sample data (people, orders, money) stays in scripts/seed.py and never reaches production.
+
+And (19 Nov 2026) the Founder's own account, so a new database has someone who can sign in, and the post for
+Galacta's GTA 6 stream on Twitch.
 """
 
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.partnerships import Brand
-from app.models.people import AppSetting
-from app.models.posts import LinkPage
+from app.models.people import AppSetting, User
+from app.models.posts import LinkPage, Post
 from app.models.store import Product
-from app.models.talent import Honour, RosterSeat, Streamer
+from app.models.talent import Honour, RosterSeat, Stream, Streamer
 
 logger = logging.getLogger(__name__)
 
@@ -245,9 +249,60 @@ async def sample_clippers(db: AsyncSession) -> str:
     return f"{len(SAMPLE_CLIPPERS)} sample clippers, {clips} clips"
 
 
+# The Founder's own account (Founder's request, 19 Nov 2026), so production has someone to sign in.
+FOUNDER = ("Kelvin Gbolo", "streamershubhq@gmail.com", "Founder & President")
+
+
+async def founder(db: AsyncSession) -> str:
+    """The Founder's account, made the way scripts/create_founder.py makes it: an emailed 7-day link to set a
+    password, then the usual sign-in code and onboarding. If the link runs out, `scripts.create_founder --resend`
+    sends a new one. Left alone when the database already has a Founder, or the email already has an account."""
+    from scripts.create_founder import create
+
+    name, email, title = FOUNDER
+    if await db.scalar(select(func.count()).select_from(User).where(User.role == "founder")):
+        return "there's a Founder already; left alone"
+    if await db.scalar(select(func.count()).select_from(User).where(func.lower(User.email) == email)):
+        return "that email already has an account; left alone"
+    await create(db, name, email, title)
+    return f"{name} invited"
+
+
+# Galacta's GTA 6 stream on Twitch, 19 Nov 2026 (01:12 GMT, Accra time), posted at the Founder's request while
+# he was live. Its graphic ships with the website (public/brand). The post and the stream belong to his
+# profile, not an account, so once he's invited from People the stream is on his desk (timestamps, clips)
+# and the post is his.
+GTA6_LIVE = {"slug": "galacta-gta-6-until-we-drop", "title": "Streaming GTA 6 until we drop!",
+             "summary": "Galacta takes on GTA 6, live on Twitch. Come, let's cause chaos! 🔥🔥🔥🔥🔥🔥",
+             "link_url": "https://www.twitch.tv/theonlygalacta", "platform": "twitch", "topic": "Gaming", "theme": "k",
+             "image_key": "/brand/galacta-gta6-live.jpg", "share_image_key": "/brand/galacta-gta6-live-share.jpg",
+             "image_layout": "thumbnail"}
+GTA6_LIVE_START = datetime(2026, 11, 19, 1, 12, tzinfo=timezone.utc)
+
+
+async def galacta_gta6_live(db: AsyncSession) -> str:
+    from app.core.security import now
+    from app.services.PostService import LIVE_WINDOW
+
+    s = await _galacta(db)
+    if not s:
+        return "Galacta isn't on the roster; nothing posted"
+    if await db.scalar(select(func.count()).select_from(Post).where(Post.slug == GTA6_LIVE["slug"])):
+        return "already there"
+    by = await db.scalar(select(User.id).where(User.role == "founder").order_by(User.created_at).limit(1))
+    on_now = now() < GTA6_LIVE_START + LIVE_WINDOW  # a database made long after the stream gets it as a past one
+    db.add(Stream(streamer_id=s.id, title=GTA6_LIVE["title"], category="GTA 6", scheduled_start=GTA6_LIVE_START,
+                  actual_start=GTA6_LIVE_START, platforms=["twitch"], status="live" if on_now else "done"))
+    db.add(Post(**GTA6_LIVE, kind="stream", streamer_id=s.id, starts_at=GTA6_LIVE_START, status="published",
+                published_at=now(), created_by=by))
+    await db.flush()
+    return "posted, and on his streams"
+
+
 STEPS = [("roster_v1", roster), ("galacta_gta6_v1", gta6_first), ("label_line_v1", label_line),
          ("sample_partners_v1", sample_partners), ("sample_designer_line_v1", sample_designer_line),
-         ("sample_clippers_v1", sample_clippers), ("org_link_bio_v1", org_link_bio)]
+         ("sample_clippers_v1", sample_clippers), ("org_link_bio_v1", org_link_bio),
+         ("founder_v1", founder), ("galacta_gta6_live_v1", galacta_gta6_live)]
 
 
 async def run(db: AsyncSession) -> dict[str, str]:

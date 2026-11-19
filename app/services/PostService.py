@@ -242,7 +242,7 @@ def when_text(p: Post) -> str:
     if p.ends_at:
         end = p.ends_at.astimezone(ACCRA)
         text += f" to {end.strftime('%H:%M') if end.date() == local.date() else end.strftime('%a %-d %b %H:%M')}"
-    return text + " (Accra)"
+    return text + " GMT"  # Accra time, which is GMT all year
 
 
 async def book(db: AsyncSession, p: Post, *, mode: str, name: str, email: str, phone: str, qty: int, method: str):
