@@ -13,7 +13,7 @@ operations and Social). Sample clippers can't sign in, are never paid and never 
 is sample data (people, orders, money) stays in scripts/seed.py and never reaches production.
 
 And (19 Nov 2026) the Founder's own account, so a new database has someone who can sign in, and the post for
-Galacta's GTA 6 stream on Twitch.
+Galacta's GTA 6 stream on Twitch; then (20 Nov 2026) the post for his GTA 6 day 2 stream on YouTube.
 """
 
 import logging
@@ -280,29 +280,59 @@ GTA6_LIVE = {"slug": "galacta-gta-6-until-we-drop", "title": "Streaming GTA 6 un
 GTA6_LIVE_START = datetime(2026, 11, 19, 1, 12, tzinfo=timezone.utc)
 
 
-async def galacta_gta6_live(db: AsyncSession) -> str:
+async def _galacta_stream_post(db: AsyncSession, spec: dict, start: datetime) -> str:
+    """A published stream post for Galacta, and the stream on his profile: upcoming before it starts, live
+    during it, and a past one for a database made long after."""
     from app.core.security import now
     from app.services.PostService import LIVE_WINDOW
 
     s = await _galacta(db)
     if not s:
         return "Galacta isn't on the roster; nothing posted"
-    if await db.scalar(select(func.count()).select_from(Post).where(Post.slug == GTA6_LIVE["slug"])):
+    if await db.scalar(select(func.count()).select_from(Post).where(Post.slug == spec["slug"])):
         return "already there"
     by = await db.scalar(select(User.id).where(User.role == "founder").order_by(User.created_at).limit(1))
-    on_now = now() < GTA6_LIVE_START + LIVE_WINDOW  # a database made long after the stream gets it as a past one
-    db.add(Stream(streamer_id=s.id, title=GTA6_LIVE["title"], category="GTA 6", scheduled_start=GTA6_LIVE_START,
-                  actual_start=GTA6_LIVE_START, platforms=["twitch"], status="live" if on_now else "done"))
-    db.add(Post(**GTA6_LIVE, kind="stream", streamer_id=s.id, starts_at=GTA6_LIVE_START, status="published",
-                published_at=now(), created_by=by))
+    at = now()
+    status = "scheduled" if at < start else "live" if at < start + LIVE_WINDOW else "done"
+    db.add(Stream(streamer_id=s.id, title=spec["title"], category="GTA 6", scheduled_start=start,
+                  actual_start=None if status == "scheduled" else start, platforms=[spec["platform"]], status=status))
+    db.add(Post(**spec, kind="stream", streamer_id=s.id, starts_at=start, status="published", published_at=at, created_by=by))
     await db.flush()
     return "posted, and on his streams"
+
+
+async def galacta_gta6_live(db: AsyncSession) -> str:
+    return await _galacta_stream_post(db, GTA6_LIVE, GTA6_LIVE_START)
+
+
+# Day 2 of GTA 6, on the label's YouTube channel, 20 Nov 2026 at 14:45 GMT (Accra time), posted at the Founder's
+# request because the image upload wasn't working. The thumbnail ships with the website (public/brand); the link
+# is the channel's live page, which always opens whatever the channel is streaming.
+GTA6_DAY2 = {"slug": "galacta-gta-6-day-2",
+             "title": "He Streamed GTA 6 for 20+ Hours Straight… Now Day 2 Gets Even Crazier! 🔥 (Galacta Live)",
+             "summary": "🔴 LIVE NOW: He streamed GTA 6 for 20+ HOURS straight on launch day… and now Day 2 in Vice City gets even crazier!\n"
+                        "Galacta (@theonlygalacta) is back on zero sleep, pushing deeper into Grand Theft Auto VI with wild story missions, "
+                        "high-speed chases, and live viewer dares. Jump into chat and test how long he lasts today!\n\n"
+                        "💬 Join the Chat: Drop your city and dare Galacta to try crazy stunts in Vice City!\n"
+                        "🎮 Follow the Talent (Galacta):\n"
+                        "• Twitch: twitch.tv/TheOnlyGalacta\n\n"
+                        "🔥 Follow Streamers Hub:\n"
+                        "Link Tree: https://streamershubmedia.com/links?via=team\n\n"
+                        "#gta6  #GrandTheftAuto6 #GTA6Live #ViceCity #StreamersHub #GhanaGaming #GamingLive",
+             "link_url": "https://www.youtube.com/@StreamersHub_Media/live", "platform": "youtube", "topic": "Gaming", "theme": "k",
+             "image_key": "/brand/galacta-gta6-day2.jpg", "share_image_key": "/brand/galacta-gta6-day2-share.jpg",
+             "image_layout": "thumbnail"}
+GTA6_DAY2_START = datetime(2026, 11, 20, 14, 45, tzinfo=timezone.utc)
+
+
+async def galacta_gta6_day2(db: AsyncSession) -> str:
+    return await _galacta_stream_post(db, GTA6_DAY2, GTA6_DAY2_START)
 
 
 STEPS = [("roster_v1", roster), ("galacta_gta6_v1", gta6_first), ("label_line_v1", label_line),
          ("sample_partners_v1", sample_partners), ("sample_designer_line_v1", sample_designer_line),
          ("sample_clippers_v1", sample_clippers), ("org_link_bio_v1", org_link_bio),
-         ("founder_v1", founder), ("galacta_gta6_live_v1", galacta_gta6_live)]
+         ("founder_v1", founder), ("galacta_gta6_live_v1", galacta_gta6_live), ("galacta_gta6_day2_v1", galacta_gta6_day2)]
 
 
 async def run(db: AsyncSession) -> dict[str, str]:

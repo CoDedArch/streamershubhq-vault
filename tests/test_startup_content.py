@@ -45,7 +45,7 @@ async def test_startup_fills_the_public_site_once(empty):
     async with session_manager.session_factory() as db:
         done = await Bootstrap.run(db)
     assert set(done) == {"roster_v1", "galacta_gta6_v1", "label_line_v1", "sample_partners_v1", "sample_designer_line_v1",
-                         "sample_clippers_v1", "org_link_bio_v1", "founder_v1", "galacta_gta6_live_v1"}
+                         "sample_clippers_v1", "org_link_bio_v1", "founder_v1", "galacta_gta6_live_v1", "galacta_gta6_day2_v1"}
     assert done["founder_v1"] == "there's a Founder already; left alone"
     home = (await guest.get("/api/v1/public/home")).json()
     star = home["roster"][0]
@@ -188,7 +188,7 @@ async def test_galactas_gta6_stream_is_posted_on_his_profile_before_he_has_an_ac
     async with session_manager.session_factory() as db:
         star = (await db.execute(select(Streamer).where(Streamer.stage_name == "Galacta"))).scalar_one()
         post = (await db.execute(select(Post).where(Post.slug == Bootstrap.GTA6_LIVE["slug"]))).scalar_one()
-        stream = (await db.execute(select(Stream).where(Stream.streamer_id == star.id))).scalar_one()
+        stream = (await db.execute(select(Stream).where(Stream.streamer_id == star.id, Stream.title == post.title))).scalar_one()
         # Both hang on his profile, the one his account takes over when he's invited
         assert post.streamer_id == star.id and post.status == "published"
         assert stream.platforms == ["twitch"] and stream.actual_start == Bootstrap.GTA6_LIVE_START
@@ -196,3 +196,30 @@ async def test_galactas_gta6_stream_is_posted_on_his_profile_before_he_has_an_ac
         assert PostService.state(post, start + timedelta(hours=1)) == "live"
         assert PostService.state(post, start + timedelta(hours=4)) == "ended"
         assert await Bootstrap.galacta_gta6_live(db) == "already there"
+
+
+async def test_galactas_gta6_day2_stream_is_posted_for_youtube_with_its_thumbnail(empty):
+    from datetime import timedelta
+
+    from app.core.security import now
+    from app.models.posts import Post
+    from app.services import PostService
+
+    p = (await new_client(empty).get(f"/api/v1/public/posts/{Bootstrap.GTA6_DAY2['slug']}")).json()
+    assert p["kind"] == "stream" and p["streamer"]["name"] == "Galacta" and p["platform_label"] == "YouTube"
+    assert p["title"].startswith("He Streamed GTA 6 for 20+ Hours Straight") and p["summary"].endswith("#GamingLive")
+    assert p["link_url"] == "https://www.youtube.com/@StreamersHub_Media/live"
+    assert p["image_url"] == "/brand/galacta-gta6-day2.jpg" and p["share_image_url"] == "/brand/galacta-gta6-day2-share.jpg"
+    assert p["when"] == "Fri 20 Nov 2026 · 14:45 GMT"
+    start = Bootstrap.GTA6_DAY2_START
+    async with session_manager.session_factory() as db:
+        star = (await db.execute(select(Streamer).where(Streamer.stage_name == "Galacta"))).scalar_one()
+        post = (await db.execute(select(Post).where(Post.slug == Bootstrap.GTA6_DAY2["slug"]))).scalar_one()
+        stream = (await db.execute(select(Stream).where(Stream.streamer_id == star.id, Stream.title == post.title))).scalar_one()
+        assert post.streamer_id == star.id and post.status == "published" and stream.platforms == ["youtube"]
+        # Upcoming until 14:45, then live: the stream on his profile matches the moment the database got it
+        assert stream.scheduled_start == start
+        assert (stream.status, stream.actual_start) == (("scheduled", None) if now() < start else ("live", start) if now() < start + PostService.LIVE_WINDOW else ("done", start))
+        assert PostService.state(post, start - timedelta(minutes=10)) == "upcoming"
+        assert PostService.state(post, start + timedelta(hours=1)) == "live"
+        assert await Bootstrap.galacta_gta6_day2(db) == "already there"
