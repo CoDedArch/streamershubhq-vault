@@ -91,6 +91,10 @@ async def nav_counts(db: AsyncSession, access: Access) -> dict:
         if s:
             counts["talent"] = await _n(db, Deliverable, Deliverable.streamer_id == s.id, Deliverable.status != "done",
                                         (Deliverable.due_at.is_(None)) | (Deliverable.due_at <= week))
+    if access.can("suggestions"):  # new ideas waiting for a first answer; for the Founder, ideas waiting for a decision too
+        from app.services.SuggestionService import nav_count
+
+        counts["suggestions"] = await nav_count(db, access)
     if access.can("me"):  # open tasks, and agreements waiting for their signature
         counts["me"] = await _n(db, Task, Task.owner_user_id == access.user.id, Task.status != "done") + await _n(
             db, Agreement, Agreement.user_id == access.user.id, Agreement.status == "offered")

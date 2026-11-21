@@ -162,3 +162,20 @@ async def contact_to_team(reference: str, reason: str, subject: str, who: str, p
     body = _p(f"<b>{escape(subject)}</b>", f"From {escape(who)} · {escape(reference)}") + _lines_html(preview[:600])
     return await send_async(to=to, subject=f"{'Reply' if again else 'New message'} · {subject} [{reference}]",
                             html=_layout(title, body, ("Answer in Hub OS", link(os_path))))
+
+
+async def suggestion_received(to: str, name: str, reference: str, title: str, path: str) -> bool:
+    body = _p(f"Hi {escape(name.split(' ')[0])},", f"Thanks for your idea, <b>{escape(title)}</b>. Your reference is <b>{escape(reference)}</b>.",
+              "The team it concerns will answer within a week. You can follow it, and read our answers, from the link below.")
+    return await send_async(to=[to], subject=f"We have your idea · {reference}", html=_layout("We have your idea.", body, ("Follow my idea", link(path))),
+                            text=f"Thanks for your idea, {title}. Reference {reference}. Follow it: {link(path)}")
+
+
+async def suggestion_update(to: str, name: str, reference: str, title: str, heading: str, text: str, path: str,
+                            signed: Optional[str] = None) -> bool:
+    """News on an idea: our answer (signed by who wrote it), planned, done, merged, or "not now" and why."""
+    body = _p(f"Hi {escape(name.split(' ')[0])},", f"About your idea <b>{escape(title)}</b> ({escape(reference)}):") + _lines_html(text)
+    if signed:
+        body += _p(f"<span style=\"color:#5A5851\">{escape(signed)} · Streamers Hub</span>")
+    return await send_async(to=[to], subject=f"{heading} · {reference}", html=_layout(heading, body, ("See my idea", link(path))),
+                            text=f"{heading}. {title} ({reference}): {text}\n{link(path)}")

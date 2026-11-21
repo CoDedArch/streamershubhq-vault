@@ -101,6 +101,7 @@ class Settings(BaseSettings):
         "app.models.agreements",
         "app.models.posts",
         "app.models.contact",
+        "app.models.suggestions",
     ]
 
     @property

@@ -423,7 +423,11 @@ async def update_task(task_id: uuid.UUID, body: TaskUpdate, access: Access = Dep
         t.on_time = (t.due_on is None) or (today() <= t.due_on)
     if body.status != "done":
         t.closed_at, t.on_time = None, None
+    from app.services import SuggestionService
+
+    mail = await SuggestionService.task_changed(db, t)  # a task from an approved idea: the idea is done (or planned again)
     await db.commit()
+    await SuggestionService.deliver(mail)
     return _task(t)
 
 

@@ -7,6 +7,8 @@ Hourly it checks the date in Accra and runs each job once per day it is due:
 - the 1st: streamer salary tiers for the new month (and Finance and the streamer are told)
 - the 25th (payroll draft_day): the payout run is drafted
 - Sundays: the Clip Table's ranks are saved so next week shows movement
+- daily: ideas with no answer after 5 days remind their department heads (once)
+- Mondays: the Founder gets the ideas the departments closed as "Not now" in the past week
 
 Only one API instance runs a pass at a time (a Postgres advisory lock), so rolling deploys and more than one
 task are safe: an instance that finds the lock taken skips the pass, and the jobs are marked done for the day
@@ -20,7 +22,7 @@ from sqlalchemy import select, text
 
 from app.core.database import session_manager
 from app.models.people import AppSetting
-from app.services import AgreementService, ClipService, PayrollService, StoreService
+from app.services import AgreementService, ClipService, PayrollService, StoreService, SuggestionService
 from app.services.CompanyService import today
 from app.services.money import month_key
 from app.services.SettingsService import get_setting
@@ -83,7 +85,15 @@ async def _run_due_jobs() -> list[str]:
         if d.weekday() == 6 and await _once(db, "clip_table_snapshot", stamp):
             await ClipService.snapshot_week(db, d)
             ran.append("clip_table_snapshot")
+        mail = []
+        if await _once(db, "suggestion_reminders", stamp):
+            mail += await SuggestionService.remind(db)
+            ran.append("suggestion_reminders")
+        if d.weekday() == 0 and await _once(db, "suggestions_closed_week", stamp):
+            mail += await SuggestionService.weekly_closed(db)
+            ran.append("suggestions_closed_week")
         await db.commit()
+    await SuggestionService.deliver(mail)
     return ran
 
 

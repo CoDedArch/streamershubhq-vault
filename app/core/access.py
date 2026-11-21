@@ -58,6 +58,7 @@ AREAS = {
     "store": ("Store operations", "/os/store", "Money"),
     "posts": ("Live, events and links", "/os/posts", "Departments"),
     "me": ("My profile and pay", "/os/me", "You"),
+    "suggestions": ("Suggestions", "/os/suggestions", "You"),
     "settings": ("Settings", "/os/settings", "You"),
 }
 NAV_GROUPS = ["Executive", "Departments", "Money", "You"]
@@ -77,7 +78,7 @@ DEPARTMENT_AREAS = {
 # streamer's own account) and not their personal pages.
 OPERATIONAL_AREAS = ["people", "review", "production", "partnerships", "social", "posts", "creative", "tech", "finance",
                      "store", "capital"]
-FOUNDER_OWN = ["command", "people", "review", "agreements", "settings", "me"]
+FOUNDER_OWN = ["command", "people", "review", "agreements", "settings", "me", "suggestions"]
 # Messages from the Contact page go to the desk that answers them (ContactService.REASONS). Anyone with
 # one of these desks has the Messages inbox, and sees only the messages for their desks.
 INBOX_DESKS = {"command", "partnerships", "social", "capital", "people", "store", "posts", "production", "tech"}
@@ -150,6 +151,7 @@ def work_out(user: User, department: Optional[str], desk: Optional[str]) -> tupl
         if role != "streamer" and {"social", "production"} & set(areas):
             areas.append("posts")  # Social and Production post the streams and events they run
         areas.append("me")
+        areas.append("suggestions")  # everyone sends ideas; the desks an idea concerns also answer it there
     if role == "founder":
         own = set(areas)
     else:

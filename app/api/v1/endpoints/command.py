@@ -16,7 +16,7 @@ from app.models.applications import Application
 from app.models.money import Decision, PayrollRun
 from app.models.partnerships import Brand, Deal
 from app.models.talent import RosterSeat, Streamer
-from app.services import CompanyService, InvestorService, PayrollService
+from app.services import CompanyService, InvestorService, PayrollService, SuggestionService
 from app.services.AuditService import audit
 from app.services.MemberService import create_member
 from app.services.money import ghs
@@ -30,7 +30,8 @@ async def _decisions(db: AsyncSession) -> list[dict]:
     out = lambda d: {"id": str(d.id), "title": d.title, "source": d.source, "kind": d.kind, "status": d.status,
                      "amount_minor": d.amount_minor, "note": d.note, "href": {"payroll": "/os/finance", "deal": "/os/partnerships",
                                                                                "seat_offer": "/os/review", "release": "/os/creative"}.get(d.kind)
-                                                                               or (f"/os/agreements/{d.entity_id}" if d.kind == "agreement" else None)}
+                                                                               or (f"/os/agreements/{d.entity_id}" if d.kind == "agreement" else None)
+                                                                               or (f"/os/suggestions?id={d.entity_id}" if d.kind == "suggestion" else None)}
     return [out(d) for d in rows] + [out(d) for d in recent]
 
 
@@ -45,6 +46,7 @@ async def command(access: Access = Depends(require_area("command")), db: AsyncSe
         "round": await InvestorService.round_progress(db),
         "network": await CompanyService.network(db),
         "live": await CompanyService.live_now(db),
+        "ideas": await SuggestionService.metrics(db),
         "pilot_month": _pilot_month(),
         "can_decide": access.is_founder,
     }
@@ -80,6 +82,18 @@ async def decide(decision_id: uuid.UUID, body: DecideIn, request: Request, acces
     if not body.approve and not (body.note or "").strip():
         raise HTTPException(400, "A decline needs a reason.")
     actor = access.user
+    if d.kind == "suggestion" and d.entity_id:  # an idea a desk recommended: approved as recommended, or declined
+        from app.models.suggestions import Suggestion
+
+        s = await db.get(Suggestion, uuid.UUID(d.entity_id), with_for_update=True)
+        if not s:
+            raise HTTPException(404, "That idea is gone.")
+        mail = await SuggestionService.approve(db, s, actor) if body.approve else await SuggestionService.decline(db, s, actor, body.note or "")
+        await audit(db, actor, f"suggestion.decided_{'approve' if body.approve else 'decline'}", "suggestion", s.reference, request=request,
+                    summary=f"{'Approved' if body.approve else 'Declined'} idea {s.reference}")
+        await db.commit()
+        await SuggestionService.deliver(mail)
+        return {"id": str(d.id), "status": "approved" if body.approve else "declined"}
     if d.kind == "payroll":
         run = await db.get(PayrollRun, uuid.UUID(d.entity_id), with_for_update=True)
         if body.approve:

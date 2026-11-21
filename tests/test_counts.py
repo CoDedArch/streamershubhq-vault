@@ -29,7 +29,7 @@ async def test_each_desk_shows_what_is_waiting_on_it(app, db):
     # A streamer sees their own brand work and their open tasks
     galacta = counts((await (await sign_in(app, "galacta")).get("/api/v1/auth/me")).json())
     assert galacta["talent"] and galacta["me"]
-    assert set(galacta) == {"talent", "me"}
+    assert set(galacta) == {"talent", "me", "suggestions"}  # Suggestions: where a streamer sends ideas
 
     # Resolving a reported problem takes it off Tech's count
     bernard = await sign_in(app, "bernard")
