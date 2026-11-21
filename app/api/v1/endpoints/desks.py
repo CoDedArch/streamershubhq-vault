@@ -40,8 +40,21 @@ def _week() -> tuple[date, date]:
     return start, start + timedelta(days=7)
 
 
+STREAM_PLATFORMS = {"youtube": "YouTube", "twitch": "Twitch", "kick": "Kick", "tiktok": "TikTok"}
+
+
+def notice_label(s: Stream) -> Optional[str]:
+    """The streamer's own notice, as the Production desk and their desk show it."""
+    if s.notice_kind == "late":
+        return f"Running {s.notice_minutes} min late"
+    if s.notice_kind == "cant":
+        return "Can't stream"
+    return None
+
+
 def _stream_row(s: Stream) -> dict:
     local = _local(s.scheduled_start)
+    end = _local(s.scheduled_end)
     late = None
     if s.actual_start:
         late = int((s.actual_start - s.scheduled_start).total_seconds() // 60)
@@ -53,7 +66,11 @@ def _stream_row(s: Stream) -> dict:
             "title": s.title, "category": s.category, "brand": s.brand_moment or "—", "status": status, "tone": tone,
             "avg_viewers": s.avg_viewers, "peak_viewers": s.peak_viewers, "state": s.status, "late_minutes": late,
             "actual_start": s.actual_start.isoformat() if s.actual_start else None,
-            "uptime": float(s.uptime_percent) if s.uptime_percent is not None else None}
+            "uptime": float(s.uptime_percent) if s.uptime_percent is not None else None,
+            "streamer_id": str(s.streamer_id), "starts_at": s.scheduled_start.isoformat(),
+            "end": end.strftime("%H:%M") if end else None, "end_day": end.strftime("%a") if end and end.date() != local.date() else None,
+            "platforms": [STREAM_PLATFORMS.get(p, p) for p in (s.platforms or [])],
+            "notice": notice_label(s), "notice_note": s.notice_note}
 
 
 # Production -----------------------------------------------------------------------------------------
@@ -116,25 +133,61 @@ async def production(access: Access = Depends(production_desk), db: AsyncSession
 
 
 class StreamIn(BaseModel):
+    """One stream, or a regular schedule: the same start (and end) time on the chosen weekdays (0 = Monday) for a
+    number of weeks, from the week of starts_at. An end time at or before the start time ends the next morning."""
+
     streamer_id: uuid.UUID
     title: str = Field(min_length=2, max_length=160)
     category: str = Field(min_length=2, max_length=60)
     starts_at: datetime
-    platforms: list[str] = ["youtube", "twitch", "kick", "tiktok"]
+    end_time: Optional[str] = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    platforms: list[str] = Field(default=["youtube"], min_length=1)
     brand_moment: Optional[str] = Field(default=None, max_length=160)
+    weekdays: list[int] = Field(default=[], max_length=7)
+    weeks: int = Field(default=1, ge=1, le=12)
 
 
 @router.post("/streams")
 async def add_stream(body: StreamIn, request: Request, access: Access = Depends(production_desk), db: AsyncSession = Depends(aget_db)):
     if not await db.get(Streamer, body.streamer_id):
         raise HTTPException(400, "Pick a streamer.")
-    starts = body.starts_at if body.starts_at.tzinfo else body.starts_at.replace(tzinfo=ACCRA)
-    s = Stream(streamer_id=body.streamer_id, title=body.title, category=body.category, scheduled_start=starts.astimezone(timezone.utc),
-               platforms=body.platforms, brand_moment=body.brand_moment, status="scheduled")
-    db.add(s)
-    await audit(db, access.user, "stream.scheduled", "stream", s.id, request=request, summary=body.title)
+    if any(p not in STREAM_PLATFORMS for p in body.platforms):
+        raise HTTPException(400, {"message": "Pick where it streams: YouTube, Twitch, Kick or TikTok.", "missing": ["platforms"]})
+    if any(d < 0 or d > 6 for d in body.weekdays):
+        raise HTTPException(400, {"message": "Pick the days of the week.", "missing": ["weekdays"]})
+    first = (body.starts_at if body.starts_at.tzinfo else body.starts_at.replace(tzinfo=ACCRA)).astimezone(ACCRA)
+    if body.weekdays:
+        monday = first.date() - timedelta(days=first.weekday())
+        days = sorted(monday + timedelta(days=7 * w + d) for w in range(body.weeks) for d in set(body.weekdays))
+        days = [d for d in days if d >= first.date()]
+    else:
+        days = [first.date()]
+    end_t = datetime.strptime(body.end_time, "%H:%M").time() if body.end_time else None
+    made = []
+    for d in days:
+        start = datetime.combine(d, first.timetz().replace(tzinfo=None), ACCRA)
+        end = None
+        if end_t:
+            end = datetime.combine(d, end_t, ACCRA)
+            if end <= start:
+                end += timedelta(days=1)
+        start_utc = start.astimezone(timezone.utc)
+        if await db.scalar(select(func.count()).select_from(Stream).where(Stream.streamer_id == body.streamer_id,
+                                                                           Stream.scheduled_start == start_utc,
+                                                                           Stream.status != "cancelled")):
+            continue  # already booked; planning the same week twice adds nothing
+        s = Stream(streamer_id=body.streamer_id, title=body.title, category=body.category, scheduled_start=start_utc,
+                   scheduled_end=end.astimezone(timezone.utc) if end else None, platforms=list(dict.fromkeys(body.platforms)),
+                   brand_moment=body.brand_moment, status="scheduled")
+        db.add(s)
+        made.append(s)
+    if not made:
+        raise HTTPException(409, "Those streams are already on the schedule.")
+    await db.flush()
+    await audit(db, access.user, "stream.scheduled", "stream", made[0].id, request=request,
+                summary=body.title if len(made) == 1 else f"{body.title} · {len(made)} streams")
     await db.commit()
-    return _stream_row(s)
+    return {"created": len(made), "streams": [_stream_row(x) for x in made]}
 
 
 class StreamUpdate(BaseModel):
@@ -876,6 +929,8 @@ async def _streamer_for(db: AsyncSession, access: Access, streamer_id: Optional[
 @router.get("/talent/summary")
 async def talent(request: Request, streamer_id: Optional[uuid.UUID] = None, access: Access = Depends(require_area("talent")),
                  db: AsyncSession = Depends(aget_db)):
+    from app.api.v1.endpoints.streamplan import desk_plan
+
     s = await _streamer_for(db, access, streamer_id)
     tonight = (await db.execute(select(Stream).where(Stream.streamer_id == s.id, Stream.status.in_(("scheduled", "live")),
                                                      Stream.scheduled_start >= now() - timedelta(hours=4))
@@ -919,7 +974,9 @@ async def talent(request: Request, streamer_id: Optional[uuid.UUID] = None, acce
     honours = (await db.execute(select(Honour).where(Honour.streamer_id == s.id).order_by(Honour.position))).scalars().all()
     return {
         "streamer": {"id": str(s.id), "stage_name": s.stage_name, "number": f"{s.signing_number:02d}", "content": s.content},
-        "tonight": None if not tonight else {**_stream_row(tonight), "platforms": tonight.platforms, "run": run},
+        "tonight": None if not tonight else {**_stream_row(tonight), "run": run},
+        **await desk_plan(db, s, tonight, base),
+        "can_notice": access.user.role == "streamer",
         "targets": targets,
         "week": [{"id": str(t.id), "title": t.title, "status": t.status, "progress": t.progress_label,
                   "label": {"done": "Done", "doing": "Doing", "open": "To do"}[t.status],

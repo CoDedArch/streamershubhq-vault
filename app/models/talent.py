@@ -25,6 +25,11 @@ class Streamer(Row, Base):
     contract_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="signed")  # signed, paused, ended
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Stream setup, kept by Production and shown on the streamer's desk (the playbook points here)
+    producer_user_id: Mapped[Optional[uuid.UUID]] = fk("users")
+    segments: Mapped[list] = mapped_column(JSON, default=list)  # repeat segments that reliably make clips
+    moderators: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    chat_rules: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class RosterSeat(Row, Base):
@@ -64,6 +69,12 @@ class Stream(Row, Base):
     uptime_percent: Mapped[Optional[float]] = mapped_column(Numeric(5, 2), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="scheduled")  # scheduled, live, done, cancelled
     recording_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    scheduled_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The streamer's own notice before a stream: running late (by notice_minutes) or can't stream
+    notice_kind: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # late, cant
+    notice_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    notice_note: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    notice_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class RunOfShowItem(Row, Base):
