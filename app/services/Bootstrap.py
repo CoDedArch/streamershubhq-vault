@@ -329,10 +329,36 @@ async def galacta_gta6_day2(db: AsyncSession) -> str:
     return await _galacta_stream_post(db, GTA6_DAY2, GTA6_DAY2_START)
 
 
+# Day 3 of GTA 6 (Chapter 3, after 35 hours over the first two days), on the label's YouTube channel, 21 Nov 2026 at
+# 13:30 GMT (Accra time), posted at the Founder's request with the title and description used on YouTube.
+GTA6_DAY3 = {"slug": "galacta-gta-6-day-3",
+             "title": "35 Hours of GTA 6 in 2 Days… Now He's Taking On Chapter 3! 🔥 Day 3 (Galacta Live)",
+             "summary": "🔴 GTA 6 DAY 3: 35 hours of Grand Theft Auto VI in just 2 days… and today Galacta takes on Chapter 3!\n"
+                        "Galacta (@theonlygalacta) is back in Vice City, pushing into Chapter 3 with new story missions, wild chases "
+                        "and live viewer dares. How far will he get today? Jump in the chat and keep him going!\n\n"
+                        "⚠️ Chapter 3 story spoilers ahead. Watch at your own risk!\n\n"
+                        "💬 Join the Chat: Drop your city, guess how far he gets today, and dare Galacta to try crazy stunts in Vice City!\n"
+                        "🔔 Subscribe and turn on notifications so you don't miss Day 4.\n\n"
+                        "🎮 Follow the Talent (Galacta):\n"
+                        "• Twitch: twitch.tv/TheOnlyGalacta\n\n"
+                        "🔥 Follow Streamers Hub:\n"
+                        "Link Tree: https://streamershubmedia.com/links?via=team\n\n"
+                        "#GTA6 #GTA6Live #Galacta #GTA6Chapter3 #GrandTheftAuto6 #ViceCity #StreamersHub #GhanaGaming",
+             "link_url": "https://www.youtube.com/@StreamersHub_Media/live", "platform": "youtube", "topic": "Gaming", "theme": "k",
+             "image_key": "/brand/galacta-gta6-day3.jpg", "share_image_key": "/brand/galacta-gta6-day3-share.jpg",
+             "image_layout": "thumbnail"}
+GTA6_DAY3_START = datetime(2026, 11, 21, 13, 30, tzinfo=timezone.utc)
+
+
+async def galacta_gta6_day3(db: AsyncSession) -> str:
+    return await _galacta_stream_post(db, GTA6_DAY3, GTA6_DAY3_START)
+
+
 STEPS = [("roster_v1", roster), ("galacta_gta6_v1", gta6_first), ("label_line_v1", label_line),
          ("sample_partners_v1", sample_partners), ("sample_designer_line_v1", sample_designer_line),
          ("sample_clippers_v1", sample_clippers), ("org_link_bio_v1", org_link_bio),
-         ("founder_v1", founder), ("galacta_gta6_live_v1", galacta_gta6_live), ("galacta_gta6_day2_v1", galacta_gta6_day2)]
+         ("founder_v1", founder), ("galacta_gta6_live_v1", galacta_gta6_live), ("galacta_gta6_day2_v1", galacta_gta6_day2),
+         ("galacta_gta6_day3_v1", galacta_gta6_day3)]
 
 
 async def run(db: AsyncSession) -> dict[str, str]:
