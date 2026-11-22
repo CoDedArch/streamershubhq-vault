@@ -134,7 +134,7 @@ class AuditLog(Row, Base):
     actor_label: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     action: Mapped[str] = mapped_column(String(80), index=True)
     entity: Mapped[str] = mapped_column(String(60))
-    entity_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    entity_id: Mapped[Optional[str]] = mapped_column(String(160), nullable=True, index=True)  # a slug or reference, not only a UUID
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     before: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     after: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

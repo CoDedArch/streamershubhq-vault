@@ -57,6 +57,10 @@ COLUMN_MIGRATIONS: list[str] = [
     "ALTER TABLE brands ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT false",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT false",
+    # The audit log keeps a post's slug as its id, and slugs run to 80 characters (was 64)
+    "DO $$ BEGIN IF (SELECT character_maximum_length FROM information_schema.columns WHERE table_schema = current_schema() "
+    "AND table_name = 'audit_log' AND column_name = 'entity_id') < 160 THEN "
+    "ALTER TABLE audit_log ALTER COLUMN entity_id TYPE VARCHAR(160); END IF; END $$",
 ]
 
 

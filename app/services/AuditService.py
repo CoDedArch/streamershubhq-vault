@@ -32,6 +32,6 @@ async def audit(db: AsyncSession, actor: Optional[User], action: str, entity: st
     db.add(AuditLog(
         actor_user_id=actor.id if actor else None,
         actor_label=label[:160],
-        action=action, entity=entity, entity_id=str(entity_id) if entity_id is not None else None,
+        action=action, entity=entity, entity_id=str(entity_id)[:160] if entity_id is not None else None,
         summary=summary, before=_plain(before), after=_plain(after), ip=client_ip(request) if request else None,
     ))

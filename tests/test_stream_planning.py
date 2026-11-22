@@ -134,17 +134,21 @@ async def test_the_streamers_desk_shows_the_streams_title_and_thumbnail_from_the
     galacta = await sign_in(app, "galacta")
     desk = (await galacta.get("/api/v1/talent/summary")).json()
     tonight = await db.get(Stream, uuid.UUID(desk["tonight"]["id"]))
-    near = (await db.execute(select(Post).where(Post.kind == "stream", Post.status == "published", Post.streamer_id == tonight.streamer_id,
-                                                Post.starts_at >= tonight.scheduled_start - timedelta(hours=2),
-                                                Post.starts_at <= tonight.scheduled_start + timedelta(hours=2)))).scalars().all()
-    assert desk["post"]["title"] == near[0].title  # the sample data's post for this stream
-    for p in near:
+    # Clear any sample post near this stream (whether one matches depends on when the sample data was made)
+    for p in (await db.execute(select(Post).where(Post.kind == "stream", Post.streamer_id == tonight.streamer_id))).scalars():
         p.status = "archived"
     await db.commit()
     assert (await galacta.get("/api/v1/talent/summary")).json()["post"] is None  # no published post, nothing to show
-    db.add(Post(slug="galacta-tonight", kind="stream", title="Tonight's big one", streamer_id=tonight.streamer_id, status="published",
-                starts_at=tonight.scheduled_start + timedelta(minutes=30), image_key="/brand/galacta-tonight.jpg",
-                link_url="https://www.youtube.com/@StreamersHub_Media/live"))
+
+    # A post three hours off is a different stream; one within two hours is this one
+    def post(slug, title, shift):
+        return Post(slug=slug, kind="stream", title=title, streamer_id=tonight.streamer_id, status="published",
+                    starts_at=tonight.scheduled_start + shift, image_key="/brand/galacta-tonight.jpg",
+                    link_url="https://www.youtube.com/@StreamersHub_Media/live")
+    db.add(post("galacta-later", "A later stream", timedelta(hours=3)))
+    await db.commit()
+    assert (await galacta.get("/api/v1/talent/summary")).json()["post"] is None
+    db.add(post("galacta-tonight", "Tonight's big one", timedelta(minutes=30)))
     await db.commit()
     desk = (await galacta.get("/api/v1/talent/summary")).json()
     assert desk["post"]["title"] == "Tonight's big one" and desk["post"]["image_url"] == "/brand/galacta-tonight.jpg"

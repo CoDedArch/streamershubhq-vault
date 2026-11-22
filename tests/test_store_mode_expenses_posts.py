@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.core.security import now
 from app.models.money import Expense, LedgerEntry
-from app.models.people import StepInAction
+from app.models.people import AuditLog, StepInAction
 from app.models.posts import LinkItem, Post
 from app.models.store import StoreInterest
 from tests.conftest import new_client, sign_in
@@ -226,6 +226,24 @@ async def test_a_stream_post_goes_up_with_a_share_image_and_counts_anonymously(a
     # A link that isn't a web link is refused
     r = await trigger.put(f"/api/v1/posts/{post['id']}", json={**body, "link_url": "javascript:alert(1)"})
     assert r.status_code == 400
+
+
+async def test_a_post_with_a_long_title_saves_and_is_audited_by_its_full_slug(app, db):
+    """A long title makes a slug longer than the audit log's old 64-character id, which failed the whole save."""
+    trigger = await sign_in(app, "trigger")
+    opts = (await trigger.get("/api/v1/posts")).json()["options"]
+    galacta_id = next(s["id"] for s in opts["streamers"] if s["name"] == "Galacta")
+    title = "35 Hours of GTA 6 in 2 Days… Now He's Taking On Chapter 3! 🔥 Day 3 (Galacta Live) and More"
+    body = {"kind": "stream", "title": title, "topic": "Gaming", "theme": "y", "streamer_id": galacta_id, "platform": "youtube",
+            "starts_at": (now() + timedelta(days=2)).isoformat(), "link_url": "https://www.youtube.com/@StreamersHub_Media/live"}
+    r = await trigger.post("/api/v1/posts", json=body)
+    assert r.status_code == 200, r.text
+    post = r.json()
+    assert len(post["slug"]) > 64
+    assert (await trigger.put(f"/api/v1/posts/{post['id']}", json={**body, "summary": "Chapter 3 tonight"})).status_code == 200
+    assert (await trigger.post(f"/api/v1/posts/{post['id']}/status", json={"status": "published"})).status_code == 200
+    actions = (await db.execute(select(AuditLog.action).where(AuditLog.entity == "post", AuditLog.entity_id == post["slug"]))).scalars().all()
+    assert {"post.created", "post.edited", "post.published"} <= set(actions)
 
 
 async def test_event_tickets_follow_the_store_mode(app, db):
