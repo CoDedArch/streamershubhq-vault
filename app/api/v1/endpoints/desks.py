@@ -25,6 +25,7 @@ from app.services import ClipService, CompanyService, PayrollService
 from app.services.AuditService import audit
 from app.services.CompanyService import ACCRA, day_start, latest_kpi, today
 from app.services.money import ghs, month_key, month_label, prev_month
+from app.services.SettingsService import get_setting
 from app.api.v1.endpoints.designs import design_out
 from app.api.v1.endpoints.network import PLATFORM_LABEL, _fetched
 
@@ -965,8 +966,9 @@ async def talent(request: Request, streamer_id: Optional[uuid.UUID] = None, acce
     income_now = await PayrollService.platform_income(db, s.id, period)
     tiers = await PayrollService.tiers(db)
     next_tier = next((t for t in tiers if t.min_platform_income_minor > income_now), None)
+    share_bps = int((await get_setting(db, "payroll")).get("streamer_share_bps") or 0)
     pay_lines = (await db.execute(select(PayrollLine, PayrollRun).join(PayrollRun, PayrollRun.id == PayrollLine.run_id)
-                                  .where(PayrollLine.payee_user_id == s.user_id).order_by(PayrollRun.period.desc()).limit(3))).all() if s.user_id else []
+                                  .where(PayrollLine.payee_user_id == s.user_id).order_by(PayrollRun.period.desc()).limit(6))).all() if s.user_id else []
     brand = (await db.execute(select(Deliverable, Brand).join(Brand, Brand.id == Deliverable.brand_id, isouter=True)
                               .where(Deliverable.streamer_id == s.id).order_by(Deliverable.due_at.desc()).limit(6))).all()
     designs = (await db.execute(select(Design).where(Design.uses_streamer_id == s.id).order_by(Design.created_at.desc()))).scalars().all()
@@ -981,13 +983,16 @@ async def talent(request: Request, streamer_id: Optional[uuid.UUID] = None, acce
         "week": [{"id": str(t.id), "title": t.title, "status": t.status, "progress": t.progress_label,
                   "label": {"done": "Done", "doing": "Doing", "open": "To do"}[t.status],
                   "tone": {"done": "ok", "doing": "warn", "open": ""}[t.status]} for t in tasks],
-        "pay": {"month": month_label(period), "tier": tier.tier_label if tier else None,
+        "pay": {"month": month_label(period), "tier": tier.tier_label if tier else None, "has_tiers": bool(tiers),
+                "share_percent": share_bps / 100 if share_bps else None,
                 "salary_minor": tier.salary_minor if tier else None,
                 "based_on": f"{month_label(prev_month(period))} platform income of {ghs(tier.previous_income_minor)}" if tier else None,
                 "income_this_month_minor": income_now,
                 "next_tier": {"label": next_tier.label, "at_minor": next_tier.min_platform_income_minor,
                               "salary_minor": next_tier.salary_minor} if next_tier else None,
-                "lines": [{"period": month_label(r.period), "amount_minor": l.amount_minor, "status": l.status if r.status in ("approved", "paid") else "awaiting approval"} for l, r in pay_lines]},
+                "lines": [{"id": str(l.id), "period": month_label(r.period), "type": PayrollService.KIND_LABEL.get(l.kind, l.kind),
+                           "basis": (l.basis or {}).get("text"), "amount_minor": l.amount_minor,
+                           "status": l.status if r.status in ("approved", "paid") else "awaiting approval"} for l, r in pay_lines]},
         "brand_work": [{"id": str(d.id), "title": f"{b.name} · {d.title}" if b else d.title, "detail": d.detail, "status": d.status,
                         "label": _due_label(d), "tone": "ok" if d.status in ("done", "sent") else ("warn" if d.due_at and _local(d.due_at).date() <= today() else "info")}
                        for d, b in brand],

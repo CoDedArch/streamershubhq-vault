@@ -182,3 +182,27 @@ class CreativeRequest(Row, Base):
     on_time: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ChannelReport(Row, Base):
+    """A streamer's monthly report on their own channels: what each earned and paid them, with the platform's
+    statement. Their own channels pay them directly, and they pass those payouts to the label. Finance confirms what
+    the label received, and that is counted as the streamer's platform income in the month it's confirmed."""
+
+    __tablename__ = "channel_reports"
+    streamer_id: Mapped[uuid.UUID] = fk("streamers", nullable=False, ondelete="CASCADE")
+    month: Mapped[str] = mapped_column(String(7))  # the month the report covers
+    status: Mapped[str] = mapped_column(String(12), default="submitted")  # submitted, returned, confirmed
+    # [{platform, earned_minor, earned_currency, paid_minor, paid_currency, statement_key, statement_name}]
+    lines: Mapped[list] = mapped_column(JSON, default=list)
+    passed_minor: Mapped[int] = mapped_column(BigInteger, default=0)  # what the streamer says they passed on, in cedis
+    transfer_ref: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    submitted_by: Mapped[Optional[uuid.UUID]] = fk("users")
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_minor: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # what Finance confirmed, in cedis
+    income_month: Mapped[Optional[str]] = mapped_column(String(7), nullable=True)  # the month it was counted in
+    reviewed_by: Mapped[Optional[uuid.UUID]] = fk("users")
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    __table_args__ = (UniqueConstraint("streamer_id", "month"),)

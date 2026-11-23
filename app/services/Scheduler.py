@@ -5,6 +5,7 @@ Hourly it checks the date in Accra and runs each job once per day it is due:
 - daily: YouTube Shorts view counts refreshed for clips in months not yet paid (a guide for verification)
 - daily: contracts drafted for streamer trials ending within 30 days, renewals for contracts ending within 90
 - the 1st: streamer salary tiers for the new month (and Finance and the streamer are told)
+- the 1st: streamers who haven't sent last month's channel earnings report are reminded
 - the 25th (payroll draft_day): the payout run is drafted
 - Sundays: the Clip Table's ranks are saved so next week shows movement
 - daily: ideas with no answer after 5 days remind their department heads (once)
@@ -22,7 +23,7 @@ from sqlalchemy import select, text
 
 from app.core.database import session_manager
 from app.models.people import AppSetting
-from app.services import AgreementService, ClipService, PayrollService, StoreService, SuggestionService
+from app.services import AgreementService, ChannelService, ClipService, PayrollService, StoreService, SuggestionService
 from app.services.CompanyService import today
 from app.services.money import month_key
 from app.services.SettingsService import get_setting
@@ -75,6 +76,9 @@ async def _run_due_jobs() -> list[str]:
         if d.day == 1 and await _once(db, "salary_tiers", stamp):
             await PayrollService.set_tiers_for_month(db, month_key(d))
             ran.append("salary_tiers")
+        if d.day == 1 and await _once(db, "channel_report_reminders", stamp):
+            await ChannelService.remind(db, d)
+            ran.append("channel_report_reminders")
         draft_day = (await get_setting(db, "payroll"))["draft_day"]
         if d.day == draft_day and await _once(db, "payroll_draft", stamp):
             try:

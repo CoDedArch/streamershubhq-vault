@@ -16,17 +16,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import now
 from app.models.clips import ClipperEarning
 from app.models.money import CarryForward, Decision, LedgerEntry, PayrollLine, PayrollRun, SalaryTier
+from app.models.partnerships import Deliverable, Invoice
 from app.models.people import StaffProfile, User
 from app.models.store import CommissionEntry, OrderItem
 from app.models.talent import PlatformIncome, SalaryTierAssignment, Streamer
 from app.services import ClipService, EmailService, StoreService
 from app.services.AuditService import audit
+from app.services.CompanyService import month_bounds
 from app.services.money import ghs, month_label, prev_month
 from app.services.SettingsService import get_setting
 
-KIND_LABEL = {"salary": "Salary", "revenue_share": "Producer share", "designer_commission": "Designer",
-              "clipper_payout": "Clipper"}
-LEDGER_CATEGORY = {"salary": "salary", "revenue_share": "payouts", "designer_commission": "payouts",
+KIND_LABEL = {"salary": "Salary", "streamer_share": "Streamer share", "revenue_share": "Producer share",
+              "designer_commission": "Designer", "clipper_payout": "Clipper"}
+LEDGER_CATEGORY = {"salary": "salary", "streamer_share": "payouts", "revenue_share": "payouts", "designer_commission": "payouts",
                    "clipper_payout": "payouts"}
 
 
@@ -63,6 +65,8 @@ async def set_tier(db: AsyncSession, streamer: Streamer, month: str) -> SalaryTi
 
 
 async def set_tiers_for_month(db: AsyncSession, month: str) -> list[SalaryTierAssignment]:
+    if not await tiers(db):  # no salary tiers set up: streamers earn only their share, so there's nothing to set or tell
+        return []
     streamers = (await db.execute(select(Streamer).where(Streamer.status == "signed"))).scalars().all()
     rows = [await set_tier(db, s, month) for s in streamers]
     finance = list((await db.execute(select(User.email).where(User.role.in_(("finance", "founder")),
@@ -75,6 +79,24 @@ async def set_tiers_for_month(db: AsyncSession, month: str) -> list[SalaryTierAs
         await EmailService.notify(([user.email] if user else []) + finance, f"{month_label(month)} salary tier · {s.stage_name}",
                                   "Salary tier set", lines)
     return rows
+
+
+async def brand_revenue(db: AsyncSession, month: str) -> dict:
+    """Brand money paid to the label in a month, credited to the streamers on each deal's deliverables (shared
+    equally when a deal has more than one). A deal with no streamer on its deliverables is credited to no one."""
+    start, end = month_bounds(month)
+    out: dict = defaultdict(int)
+    invoices = (await db.execute(select(Invoice).where(Invoice.status == "paid", Invoice.deal_id.is_not(None),
+                                                       Invoice.paid_at >= start, Invoice.paid_at < end))).scalars().all()
+    for inv in invoices:
+        ids = sorted(set((await db.execute(select(Deliverable.streamer_id).where(
+            Deliverable.deal_id == inv.deal_id, Deliverable.streamer_id.is_not(None)))).scalars()), key=str)
+        if not ids:
+            continue
+        each, rest = divmod(inv.amount_minor, len(ids))
+        for i, sid in enumerate(ids):
+            out[sid] += each + (1 if i < rest else 0)
+    return out
 
 
 async def _payout_details(db: AsyncSession, user_id) -> tuple[Optional[str], bool]:
@@ -109,8 +131,11 @@ async def draft_run(db: AsyncSession, period: str, actor: Optional[User]) -> Pay
     minimum = int(pay_rules["minimum_payout_minor"])
     lines: list[tuple[PayrollLine, list]] = []  # line, claims
 
-    # Streamer salaries, from the tier set for the month
-    for s in (await db.execute(select(Streamer).where(Streamer.status == "signed", Streamer.user_id.is_not(None)))).scalars():
+    streamers = list((await db.execute(select(Streamer).where(Streamer.status == "signed", Streamer.user_id.is_not(None))
+                                       .order_by(Streamer.signing_number))).scalars())
+    # Streamer salaries, from the tier set for the month. With no salary tiers set up at all (a pilot where
+    # streamers earn only their share), there is no salary line rather than a GHS 0 one on hold.
+    for s in streamers if await tiers(db) else []:
         tier = await set_tier(db, s, period)
         basis = {"text": f"{month_label(period).split(' ')[0]} · {tier.tier_label}",
                  "previous_income_minor": tier.previous_income_minor}
@@ -119,6 +144,22 @@ async def draft_run(db: AsyncSession, period: str, actor: Optional[User]) -> Pay
         if tier.salary_minor is None:
             basis["text"] += " · salary for this tier not set"
         lines.append((line, []))
+
+    # Each streamer's share of what their content brought in last month: their platform income (including what
+    # they passed on from their own channels, counted when Finance confirmed it) and brand deals paid for their work
+    streamer_bps = int(pay_rules.get("streamer_share_bps") or 0)
+    if streamer_bps:
+        last = prev_month(period)
+        brand = await brand_revenue(db, last)
+        for s in streamers:
+            platform, deals = await platform_income(db, s.id, last), brand.get(s.id, 0)
+            amount = int((Decimal(platform + deals) * streamer_bps / Decimal(10000)).quantize(Decimal(1), ROUND_HALF_UP))
+            if not amount:
+                continue
+            text = f"{streamer_bps / 100:g}% of {month_label(last).split(' ')[0]} revenue: {ghs(platform)} platform income" \
+                   + (f", {ghs(deals)} brand deals" if deals else "")
+            lines.append((PayrollLine(run_id=run.id, payee_user_id=s.user_id, kind="streamer_share", amount_minor=amount,
+                                      basis={"text": text, "platform_minor": platform, "brand_minor": deals}), []))
 
     # Revenue shares (the producer's 5% of platform income)
     share_bps = int(pay_rules.get("producer_share_bps") or 0)
@@ -289,7 +330,7 @@ async def mark_paid(db: AsyncSession, line: PayrollLine, run: PayrollRun, actor:
 async def run_rows(db: AsyncSession, run: PayrollRun) -> list[dict]:
     lines = (await db.execute(select(PayrollLine, User).join(User, User.id == PayrollLine.payee_user_id)
                               .where(PayrollLine.run_id == run.id))).all()
-    order = {"salary": 0, "revenue_share": 1, "designer_commission": 2, "clipper_payout": 3}
+    order = {"salary": 0, "streamer_share": 1, "revenue_share": 2, "designer_commission": 3, "clipper_payout": 4}
     lines.sort(key=lambda r: (order.get(r[0].kind, 9), -r[0].amount_minor))
     return [{"id": str(l.id), "payee": u.handle or u.name, "payee_id": str(u.id), "kind": l.kind, "type": KIND_LABEL[l.kind],
              "basis": l.basis.get("text"), "method": {"momo": "Mobile Money", "bank": "Bank"}.get(l.method or "", "Not set"),

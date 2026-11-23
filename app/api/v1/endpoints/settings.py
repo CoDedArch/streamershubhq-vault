@@ -64,6 +64,8 @@ def _check(key: str, value: dict) -> None:
                                          "then switch the store to taking payment.")
     if key == "payroll" and not 1 <= int(v["draft_day"]) <= 28:
         raise HTTPException(400, "The draft day must be between the 1st and the 28th.")
+    if key == "payroll" and not (0 <= int(v["producer_share_bps"]) <= 5000 and 0 <= int(v["streamer_share_bps"]) <= 10000):
+        raise HTTPException(400, "The producer's share can be up to 50% and the streamer's up to 100%.")
     if key == "performance":
         for role, weights in v.items():
             if sum(int(x) for x in weights.values()) != 100:

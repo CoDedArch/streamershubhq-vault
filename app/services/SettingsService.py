@@ -26,7 +26,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
                            {"zone": "kumasi", "label": "Kumasi", "minor": 4500},
                            {"zone": "other", "label": "Rest of Ghana", "minor": 6000},
                            {"zone": "pickup", "label": "Pick up at the studio", "minor": 0}]},
-    "payroll": {"minimum_payout_minor": 5000, "draft_day": 25, "producer_share_bps": 500},
+    "payroll": {"minimum_payout_minor": 5000, "draft_day": 25, "producer_share_bps": 500, "streamer_share_bps": 0},
     # Weights for the monthly performance score, by role. Each set adds up to 100.
     "performance": {"default": {"goals": 50, "on_time": 30, "lead": 20},
                     "streamer": {"goals": 60, "on_time": 30, "lead": 10}},
