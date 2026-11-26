@@ -22,7 +22,7 @@ from app.models.people import Department, EquityGrant, Goal, LeadRating, Onboard
 from app.models.talent import Streamer
 from app.services import PerformanceService, S3Service
 from app.services.AuditService import audit
-from app.services.CompanyService import today
+from app.services.CompanyService import month_bounds, today
 from app.services.MemberService import create_member
 from app.services.money import month_key, month_label
 
@@ -125,7 +125,11 @@ async def people(access: Access = Depends(require_area("people")), db: AsyncSess
         return (await db.execute(q)).scalars().all()
 
     this_week, last_week = await closed(week_start, week_start + timedelta(days=7)), await closed(last_start, week_start)
-    pct = lambda rows: round(sum(1 for t in rows if t.on_time) * 100 / len(rows)) if rows else None  # noqa: E731
+    def pct(rows) -> Optional[int]:
+        """On time, of the tasks closed that had a due date (a task with no date is neither on time nor late)."""
+        timed = [t for t in rows if t.on_time is not None]
+        return round(sum(1 for t in timed if t.on_time) * 100 / len(timed)) if timed else None
+
     oq = select(Task).where(Task.status != "done", Task.due_on < today())
     if scope:
         oq = oq.where(Task.department_id == scope)
@@ -285,7 +289,10 @@ async def person(user_id: uuid.UUID, access: Access = Depends(require_area("peop
     perf = await PerformanceService.work_out(db, u, period)
     goals = (await db.execute(select(Goal).where(Goal.owner_user_id == u.id).order_by(Goal.period_end.desc()).limit(20))).scalars().all()
     tasks = (await db.execute(select(Task).where(Task.owner_user_id == u.id).order_by(Task.created_at.desc()).limit(30))).scalars().all()
+    manage = await _may_manage(db, access, u.id)
     out = {"id": str(u.id), "name": u.name, "email": u.email, "role": u.role, "title": a.title, "department": a.department,
+           # Set goals and tasks for them, tick their tasks off; rate them (never yourself, never the Founder)
+           "can_manage": manage, "can_rate": manage and u.id != access.user.id and u.role != "founder",
            "desk": a.desk, "status": u.status, "performance": perf,
            "step_in": {"grant": list(u.step_in or []), "desks": a.stepped_in,
                        "options": [{"area": x, "label": AREAS[x][0]} for x in OPERATIONAL_AREAS],
@@ -304,7 +311,8 @@ def _goal(g: Goal) -> dict:
     target, current = float(g.target), float(g.current)
     return {"id": str(g.id), "title": g.title, "target": target, "current": current, "unit": g.unit, "status": g.status,
             "period_start": g.period_start.isoformat(), "period_end": g.period_end.isoformat(),
-            "percent": min(100, round(current * 100 / target)) if target else 0}
+            "percent": min(100, round(current * 100 / target)) if target else 0,
+            "met": g.status == "done" or bool(target and current >= target)}
 
 
 def _task(t: Task) -> dict:
@@ -330,12 +338,20 @@ async def _vesting(db: AsyncSession, user_id) -> list[dict]:
 class GoalIn(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     owner_user_id: Optional[uuid.UUID] = None
-    target: float = Field(ge=0)
+    target: float = Field(gt=0)
     current: float = Field(default=0, ge=0)
     unit: Optional[str] = Field(default=None, max_length=30)
     period_start: date
     period_end: date
     metric_key: Optional[str] = None
+
+
+async def _may_manage(db: AsyncSession, access: Access, owner_id: Optional[uuid.UUID]) -> bool:
+    try:
+        await _can_manage(db, access, owner_id)
+        return True
+    except HTTPException:
+        return False
 
 
 async def _can_manage(db: AsyncSession, access: Access, owner_id: Optional[uuid.UUID]) -> None:
@@ -357,7 +373,7 @@ async def add_goal(body: GoalIn, request: Request, access: Access = Depends(requ
     owner = await db.get(User, body.owner_user_id) if body.owner_user_id else None
     g = Goal(title=body.title, owner_user_id=body.owner_user_id, department_id=owner.department_id if owner else access.user.department_id,
              target=body.target, current=body.current, unit=body.unit, period_start=body.period_start,
-             period_end=body.period_end, metric_key=body.metric_key)
+             period_end=body.period_end, metric_key=body.metric_key, assigned_by_id=access.user.id)  # emailed in a bundle
     db.add(g)
     await audit(db, access.user, "goal.added", "goal", g.id, request=request, summary=body.title)
     await db.commit()
@@ -384,6 +400,19 @@ async def update_goal(goal_id: uuid.UUID, body: GoalUpdate, access: Access = Dep
     return _goal(g)
 
 
+@router.delete("/goals/{goal_id}")
+async def remove_goal(goal_id: uuid.UUID, request: Request, access: Access = Depends(require_area("people")),
+                      db: AsyncSession = Depends(aget_db)):
+    g = await db.get(Goal, goal_id)
+    if not g or g.is_pilot_target:
+        raise HTTPException(404, "Goal not found.")
+    await _can_manage(db, access, g.owner_user_id)
+    await audit(db, access.user, "goal.removed", "goal", g.id, request=request, summary=g.title)
+    await db.delete(g)
+    await db.commit()
+    return {"ok": True}
+
+
 class TaskIn(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     owner_user_id: uuid.UUID
@@ -397,7 +426,7 @@ async def add_task(body: TaskIn, access: Access = Depends(require_area("people",
         await _can_manage(db, access, body.owner_user_id)
     owner = await db.get(User, body.owner_user_id)
     t = Task(title=body.title, owner_user_id=body.owner_user_id, department_id=owner.department_id if owner else None,
-             due_on=body.due_on, is_weekly_milestone=body.weekly)
+             due_on=body.due_on, is_weekly_milestone=body.weekly, assigned_by_id=access.user.id)  # emailed in a bundle
     db.add(t)
     await db.commit()
     return _task(t)
@@ -420,7 +449,7 @@ async def update_task(task_id: uuid.UUID, body: TaskUpdate, access: Access = Dep
         t.progress_label = body.progress
     if body.status == "done" and not t.closed_at:
         t.closed_at = now()
-        t.on_time = (t.due_on is None) or (today() <= t.due_on)
+        t.on_time = None if t.due_on is None else today() <= t.due_on  # no due date: not counted either way
     if body.status != "done":
         t.closed_at, t.on_time = None, None
     from app.services import SuggestionService
@@ -442,6 +471,8 @@ async def rate(user_id: uuid.UUID, body: RatingIn, request: Request, access: Acc
     await _can_manage(db, access, user_id)
     if user_id == access.user.id:
         raise HTTPException(400, "You can't rate yourself.")
+    if (await db.get(User, user_id)).role == "founder":
+        raise HTTPException(400, "The Founder isn't rated. Their score is their goals and on-time delivery.")
     period = month_key(today())
     row = (await db.execute(select(LeadRating).where(LeadRating.user_id == user_id, LeadRating.period == period))).scalar_one_or_none()
     if not row:
@@ -601,6 +632,9 @@ async def my_overview(access: Access = Depends(current_access), db: AsyncSession
                               .where(PayrollLine.payee_user_id == u.id).order_by(PayrollRun.period.desc()).limit(12))).all()
     profile = (await db.execute(select(StaffProfile).where(StaffProfile.user_id == u.id))).scalar_one_or_none()
     tasks = (await db.execute(select(Task).where(Task.owner_user_id == u.id, Task.status != "done").order_by(Task.due_on))).scalars().all()
+    start, end = month_bounds(month_key(today()))
+    goals = (await db.execute(select(Goal).where(Goal.owner_user_id == u.id, Goal.period_start < end, Goal.period_end >= start)
+                              .order_by(Goal.period_end))).scalars().all()
     return {
         "name": u.name, "email": u.email, "title": access.title, "role": u.role, "department": access.department,
         "performance": await PerformanceService.work_out(db, u, month_key(today())) if u.role in OS_ROLES else None,
@@ -612,6 +646,7 @@ async def my_overview(access: Access = Depends(current_access), db: AsyncSession
                    "momo_hint": f"MoMo ··· {profile.momo_last3}" if profile and profile.momo_last3 else None,
                    "bank_hint": f"{profile.bank_name} ··· {profile.bank_last4}" if profile and profile.bank_last4 else None},
         "tasks": [_task(t) for t in tasks],
+        "goals": [_goal(g) for g in goals],
     }
 
 

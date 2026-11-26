@@ -24,10 +24,14 @@ async def work_out(db: AsyncSession, user: User, period: str) -> dict:
     timed = [t for t in tasks if t.on_time is not None]
     on_time = sum(1 for t in timed if t.on_time)
     rating = (await db.execute(select(LeadRating).where(LeadRating.user_id == user.id, LeadRating.period == period))).scalar_one_or_none()
+    if user.role == "founder":  # nobody rates the Founder: their score is goals and on-time delivery
+        weights, rating = {**weights, "lead": 0}, None
     parts = {
         "goals": (round(goals_done * 100 / len(goals)) if goals else None, f"{goals_done} of {len(goals)} goals met"),
         "on_time": (round(on_time * 100 / len(timed)) if timed else None, f"{on_time} of {len(timed)} tasks on time"),
-        "lead": (rating.rating if rating else None, "Lead's rating" + (f": {rating.note}" if rating and rating.note else "")),
+        "lead": (rating.rating if rating else None,
+                 "No lead rating for the Founder" if user.role == "founder"
+                 else "Lead's rating" + (f": {rating.note}" if rating and rating.note else "")),
     }
     used = {k: v for k, v in parts.items() if v[0] is not None and weights.get(k)}
     total_w = sum(weights[k] for k in used)

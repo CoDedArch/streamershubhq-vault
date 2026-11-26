@@ -454,7 +454,7 @@ async def approve(db: AsyncSession, s: Suggestion, actor: User, *, owner_user_id
     rec.update(owner_user_id=str(owner.id), owner=owner.name, due_on=due.isoformat() if due else None,
                cost_minor=int(cost_minor) if cost_minor is not None else rec.get("cost_minor", 0))
     t = Task(title=f"Idea {s.reference}: {rec.get('action') or s.title}"[:200], owner_user_id=owner.id,
-             department_id=owner.department_id, due_on=due)
+             department_id=owner.department_id, due_on=due, assigned_by_id=actor.id, notified_at=now())  # emailed below
     db.add(t)
     await db.flush()
     s.recommendation, s.task_id, s.status, s.decided_by, s.decided_at = rec, t.id, "planned", actor.id, now()

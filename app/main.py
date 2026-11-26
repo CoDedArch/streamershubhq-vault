@@ -52,15 +52,15 @@ async def lifespan(app: FastAPI):
     refuse_unsafe_production()
     await session_manager.init()
     await _website_content()
-    task = None
+    tasks = []
     if settings.SH_RUN_SCHEDULER:
-        from app.services.Scheduler import run_forever
+        from app.services.Scheduler import notices_forever, run_forever
 
-        task = asyncio.create_task(run_forever())
+        tasks = [asyncio.create_task(run_forever()), asyncio.create_task(notices_forever())]
     try:
         yield
     finally:
-        if task:
+        for task in tasks:
             task.cancel()
         await session_manager.close()
 

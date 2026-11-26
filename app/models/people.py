@@ -155,6 +155,8 @@ class Goal(Row, Base):
     status: Mapped[str] = mapped_column(String(20), default="open")  # open, done, missed
     is_pilot_target: Mapped[bool] = mapped_column(Boolean, default=False)
     sort: Mapped[int] = mapped_column(Integer, default=0)
+    assigned_by_id: Mapped[Optional[uuid.UUID]] = fk("users")  # who set it (empty on older goals and the sample data)
+    notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # owner emailed about it
 
 
 class Task(Row, Base):
@@ -168,6 +170,8 @@ class Task(Row, Base):
     on_time: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     is_weekly_milestone: Mapped[bool] = mapped_column(Boolean, default=False)
     progress_label: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)  # "6 of 7"
+    assigned_by_id: Mapped[Optional[uuid.UUID]] = fk("users")  # who gave it (empty on older tasks and the sample data)
+    notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)  # owner emailed about it
 
 
 class PerformanceScore(Row, Base):

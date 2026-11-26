@@ -61,6 +61,13 @@ COLUMN_MIGRATIONS: list[str] = [
     "DO $$ BEGIN IF (SELECT character_maximum_length FROM information_schema.columns WHERE table_schema = current_schema() "
     "AND table_name = 'audit_log' AND column_name = 'entity_id') < 160 THEN "
     "ALTER TABLE audit_log ALTER COLUMN entity_id TYPE VARCHAR(160); END IF; END $$",
+    # A task with no due date is neither on time nor late (it used to count as on time)
+    "UPDATE tasks SET on_time = NULL WHERE due_on IS NULL AND on_time IS NOT NULL",
+    # Who gave a task or goal, and when its owner was emailed (TaskNoticeService). Older rows stay empty: never emailed
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_by_id UUID REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ",
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS assigned_by_id UUID REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ",
 ]
 
 

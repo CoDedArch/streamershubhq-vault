@@ -10,6 +10,9 @@ Hourly it checks the date in Accra and runs each job once per day it is due:
 - Sundays: the Clip Table's ranks are saved so next week shows movement
 - daily: ideas with no answer after 5 days remind their department heads (once)
 - Mondays: the Founder gets the ideas the departments closed as "Not now" in the past week
+- daily from 07:00: each person's tasks due today, and those overdue since yesterday (TaskNoticeService)
+
+Every 2 minutes a second, lighter loop sends the bundled emails about new tasks and goals (TaskNoticeService).
 
 Only one API instance runs a pass at a time (a Postgres advisory lock), so rolling deploys and more than one
 task are safe: an instance that finds the lock taken skips the pass, and the jobs are marked done for the day
@@ -18,18 +21,21 @@ by the one holding it.
 
 import asyncio
 import logging
+from datetime import datetime
 
 from sqlalchemy import select, text
 
 from app.core.database import session_manager
 from app.models.people import AppSetting
-from app.services import AgreementService, ChannelService, ClipService, PayrollService, StoreService, SuggestionService
-from app.services.CompanyService import today
+from app.services import AgreementService, ChannelService, ClipService, PayrollService, StoreService, SuggestionService, TaskNoticeService
+from app.services.CompanyService import ACCRA, today
 from app.services.money import month_key
 from app.services.SettingsService import get_setting
 
 logger = logging.getLogger(__name__)
 LOCK_KEY = 5_348_000_001  # any fixed number; only the scheduler takes it (advisory locks are per database)
+NOTICE_LOCK_KEY = 5_348_000_002  # the 2-minute notices loop
+NOTICE_EVERY_SECONDS = 120
 
 
 async def _once(db, job: str, day_key: str) -> bool:
@@ -96,9 +102,41 @@ async def _run_due_jobs() -> list[str]:
         if d.weekday() == 0 and await _once(db, "suggestions_closed_week", stamp):
             mail += await SuggestionService.weekly_closed(db)
             ran.append("suggestions_closed_week")
+        if datetime.now(ACCRA).hour >= TaskNoticeService.REMIND_FROM_HOUR and await _once(db, "task_reminders", stamp):
+            mail += await TaskNoticeService.due_reminder_mail(db, d)
+            ran.append("task_reminders")
         await db.commit()
     await SuggestionService.deliver(mail)
     return ran
+
+
+async def send_notices() -> int:
+    """The bundled task and goal emails that are due (skipped if another instance holds the lock)."""
+    async with session_manager.engine.connect() as lock:
+        got = (await lock.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": NOTICE_LOCK_KEY})).scalar()
+        await lock.commit()
+        if not got:
+            return 0
+        try:
+            async with session_manager.session_factory() as db:
+                mail = await TaskNoticeService.assignment_mail(db)
+                await db.commit()
+            await SuggestionService.deliver(mail)
+            return len(mail)
+        finally:
+            await lock.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": NOTICE_LOCK_KEY})
+            await lock.commit()
+
+
+async def notices_forever() -> None:
+    while True:
+        try:
+            sent = await send_notices()
+            if sent:
+                logger.info("Task emails sent: %s", sent)
+        except Exception:
+            logger.exception("Task emails pass failed")
+        await asyncio.sleep(NOTICE_EVERY_SECONDS)
 
 
 async def run_forever() -> None:
