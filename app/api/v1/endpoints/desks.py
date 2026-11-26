@@ -217,6 +217,9 @@ async def update_stream(stream_id: uuid.UUID, body: StreamUpdate, access: Access
     return _stream_row(s)
 
 
+RUN_LEAD_MINUTES = 6 * 60  # run-of-show items up to this long before the start are pre-show, not the end of the night
+
+
 class RunItemIn(BaseModel):
     time: str = Field(pattern=r"^\d{2}:\d{2}$")
     title: str = Field(min_length=1, max_length=160)
@@ -227,11 +230,21 @@ class RunItemIn(BaseModel):
 @router.put("/streams/{stream_id}/run-of-show")
 async def set_run_of_show(stream_id: uuid.UUID, items: list[RunItemIn], access: Access = Depends(production_desk),
                           db: AsyncSession = Depends(aget_db)):
-    if not await db.get(Stream, stream_id):
+    stream = await db.get(Stream, stream_id)
+    if not stream:
         raise HTTPException(404, "Stream not found.")
+    start = _local(stream.scheduled_start)
+    pivot = start.hour * 60 + start.minute - RUN_LEAD_MINUTES
+
+    def since_start(item: RunItemIn) -> int:
+        """Order through the night: counted from a few hours before the start, a pre-show item comes first and,
+        on a show that runs past midnight, 00:30 comes after 23:00 (sorted as text it would come first)."""
+        h, m = item.time.split(":")
+        return (int(h) * 60 + int(m) - pivot) % 1440
+
     for row in (await db.execute(select(RunOfShowItem).where(RunOfShowItem.stream_id == stream_id))).scalars():
         await db.delete(row)
-    for i, item in enumerate(sorted(items, key=lambda x: x.time)):
+    for i, item in enumerate(sorted(items, key=since_start)):
         db.add(RunOfShowItem(stream_id=stream_id, at_time=item.time, title=item.title, note=item.note, status=item.status, position=i))
     await db.commit()
     return {"ok": True}

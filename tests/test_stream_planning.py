@@ -130,6 +130,23 @@ async def test_run_of_show_and_the_streamers_late_or_cant_stream_notice(app, db)
     assert (await galacta.post(path, json={"kind": "late", "minutes": 30})).status_code == 409
 
 
+async def test_the_run_of_show_stays_in_order_through_midnight(app, db):
+    certified = await sign_in(app, "certified")
+    tomorrow = today() + timedelta(days=1)
+    made = (await certified.post("/api/v1/streams", json={"streamer_id": await galacta_id(db), "title": "All-nighter", "category": "GTA 6",
+                                                          "starts_at": f"{tomorrow.isoformat()}T22:00", "end_time": "03:00",
+                                                          "platforms": ["youtube"]})).json()
+    stream_id = made["streams"][0]["id"]
+    r = await certified.put(f"/api/v1/streams/{stream_id}/run-of-show",
+                            json=[{"time": "00:30", "title": "After midnight"}, {"time": "21:45", "title": "Pre-show check"},
+                                  {"time": "23:00", "title": "Chat Dares"}, {"time": "02:45", "title": "Wrap up"},
+                                  {"time": "22:00", "title": "Open"}])
+    assert r.status_code == 200, r.text
+    plan = (await certified.get(f"/api/v1/streams/{stream_id}/plan")).json()
+    # Sorted as text, 00:30 and 02:45 would come before the opening
+    assert [i["title"] for i in plan["run"]] == ["Pre-show check", "Open", "Chat Dares", "After midnight", "Wrap up"]
+
+
 async def test_the_streamers_desk_shows_the_streams_title_and_thumbnail_from_the_website_post(app, db):
     galacta = await sign_in(app, "galacta")
     desk = (await galacta.get("/api/v1/talent/summary")).json()
