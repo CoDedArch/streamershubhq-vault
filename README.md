@@ -46,6 +46,16 @@ YouTube Shorts clips then get YouTube's public view count when submitted and onc
 is approved, using a small part of the free daily quota. The Social Media Manager still verifies every clip: the count is
 shown as a guide, with a warning when the clipper reported much more. Other platforms are checked by hand, as before.
 
+## Hubby, the Hub OS helper (AI optional)
+
+Hubby answers "where do I…" questions in Hub OS, the Designer Studio, the Clipper Desk and the Investor Vault. It always
+works: without an Anthropic API key it answers from its built-in guide (`app/services/hubby_guide.py`), searched in the
+browser. To turn on AI answers, put `SH_ANTHROPIC_API_KEY` in `.env.streamershub` (`ANTHROPIC_API_KEY` is read too) and
+restart. AI answers stream to the page as they're written (`POST /hubby/ask` is server-sent events, so a proxy in front
+must not buffer it). If the AI errors, sends no words within `SH_HUBBY_TIMEOUT_SECONDS` (8), or breaks off mid-answer,
+that question is answered from the guide; after 3 failures in a row it stays on the guide for 5 minutes. The Founder turns AI on or off, picks the model and sets a monthly
+spending cap and a daily limit per person in Settings → Hubby. Update the guide when a page or button is renamed.
+
 ## Shared `.env`, separate data
 
 `.env` is a copy of the school server's file (SES, S3, JWT secret). Anything that must not be shared is under an `SH_`

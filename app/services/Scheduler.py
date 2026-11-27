@@ -102,6 +102,11 @@ async def _run_due_jobs() -> list[str]:
         if d.weekday() == 0 and await _once(db, "suggestions_closed_week", stamp):
             mail += await SuggestionService.weekly_closed(db)
             ran.append("suggestions_closed_week")
+        if await _once(db, "hubby_tidy", stamp):
+            from app.services import HubbyService
+
+            await HubbyService.tidy(db)
+            ran.append("hubby_tidy")
         if datetime.now(ACCRA).hour >= TaskNoticeService.REMIND_FROM_HOUR and await _once(db, "task_reminders", stamp):
             mail += await TaskNoticeService.due_reminder_mail(db, d)
             ran.append("task_reminders")

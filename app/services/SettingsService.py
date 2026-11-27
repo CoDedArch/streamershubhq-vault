@@ -30,6 +30,9 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     # Weights for the monthly performance score, by role. Each set adds up to 100.
     "performance": {"default": {"goals": 50, "on_time": 30, "lead": 20},
                     "streamer": {"goals": 60, "on_time": 30, "lead": 10}},
+    # Hubby, the Hub OS helper. ai_on: answer with Claude when a key is set (otherwise, and whenever the AI fails, it
+    # answers from the built-in guide). The cap is an estimate from list prices; the Anthropic Console has the real bill.
+    "hubby": {"ai_on": True, "model": "claude-opus-5-5", "monthly_cap_usd": 10, "daily_per_person": 30},
     # The four 6-month pilot targets the company is measured against
     "pilot": {"ends_on": "2027-03-31"},
 }

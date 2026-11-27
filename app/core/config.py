@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # Personal data at rest (phone, mobile money numbers). Derived from SECRET_KEY when not set.
     SH_DATA_KEY: Optional[str] = None
 
+    # Hubby's AI answers (Claude). SH_ANTHROPIC_API_KEY wins; ANTHROPIC_API_KEY is read too. With neither, or if
+    # the AI fails, Hubby answers from its built-in guide, so it always works.
+    SH_ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    SH_HUBBY_TIMEOUT_SECONDS: float = 8.0
+
     SH_RUN_SCHEDULER: bool = True
     SH_BCRYPT_ROUNDS: int = 12
     SH_PROXY_HOPS: int = 0  # 1 behind one load balancer; 0 when the API is reached directly
@@ -102,6 +108,7 @@ class Settings(BaseSettings):
         "app.models.posts",
         "app.models.contact",
         "app.models.suggestions",
+        "app.models.hubby",
     ]
 
     @property
@@ -123,6 +130,11 @@ class Settings(BaseSettings):
     @property
     def from_email(self) -> str:
         return self.SH_FROM_EMAIL or self.FROM_EMAIL or "no-reply@streamershubmedia.com"
+
+    @property
+    def anthropic_key(self) -> str:
+        key = (self.SH_ANTHROPIC_API_KEY or self.ANTHROPIC_API_KEY or "").strip().strip("'\"")
+        return "" if key.lower() in ("none", "null") else key
 
     @property
     def payments_test_mode(self) -> bool:

@@ -16,7 +16,7 @@ from app.services.AuditService import audit
 from app.services.SettingsService import DEFAULTS, get_setting, put_setting
 
 router = APIRouter(prefix="/settings", tags=["settings"])
-EDITABLE = ("commission", "clipper_pay", "exit", "store", "payroll", "performance")
+EDITABLE = ("commission", "clipper_pay", "exit", "store", "payroll", "performance", "hubby")
 
 
 @router.get("")
@@ -66,6 +66,21 @@ def _check(key: str, value: dict) -> None:
         raise HTTPException(400, "The draft day must be between the 1st and the 28th.")
     if key == "payroll" and not (0 <= int(v["producer_share_bps"]) <= 5000 and 0 <= int(v["streamer_share_bps"]) <= 10000):
         raise HTTPException(400, "The producer's share can be up to 50% and the streamer's up to 100%.")
+    if key == "hubby":
+        from app.services.HubbyService import MODELS
+
+        if v["model"] not in MODELS:
+            raise HTTPException(400, "Pick one of the listed models.")
+        if not isinstance(v["ai_on"], bool):
+            raise HTTPException(400, "AI answers are either on or off.")
+        try:
+            cap, daily = float(v["monthly_cap_usd"]), int(v["daily_per_person"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Enter the cap in US dollars and the daily limit as a number.")
+        if not 1 <= cap <= 1000:
+            raise HTTPException(400, "The monthly cap must be between $1 and $1,000.")
+        if not 1 <= daily <= 200:
+            raise HTTPException(400, "Each person can ask between 1 and 200 AI questions a day.")
     if key == "performance":
         for role, weights in v.items():
             if sum(int(x) for x in weights.values()) != 100:
